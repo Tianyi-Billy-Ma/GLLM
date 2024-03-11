@@ -1,5 +1,5 @@
 data/
 llama/
 models/LLMs/
-**/__pychache__/
-/__pychache__
+# **/__pychache__/
+# /__pychache__
