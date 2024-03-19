@@ -22,21 +22,28 @@ def parse_args():
     parser.add_argument("--LLMs_dir", default=LLMs_dir)
     parser.add_argument("--LLMs_model_name", default="llama-2-7b", type=str)
     # args for GNNs
+    parser.add_argument("-GNNs_epochs", default=500, type=int)
+    parser.add_argument("-GNNs_lr", default=0.001, type=float)
+    parser.add_argument("-GNNs_wd", default=0.0, type=float)
+    parser.add_argument("--GNNs_aug", default="mask", type=str)
+    parser.add_argument("--GNNs_aug_ratio", default=0.2, type=float)
+    parser.add_argument("--GNNs_tau", default=0.2, type=float)
     parser.add_argument("--GNNs_dir", default=GNNs_dir)
     parser.add_argument("--GNNs_name", default="GCN", type=str)
     parser.add_argument("--GNNs_num_layers", default=2, type=int)
     parser.add_argument("--GNNs_dropout", default=0.5, type=float)
     parser.add_argument("--GNNs_aggregate", default="mean", type=str)
-    parser.add_argument("--GNNs_normalization", action="store_false")
+    parser.add_argument("--GNNs_normalization", default="ln", type=str)
     parser.add_argument("--GNNs_input_norm", action="store_false")
     parser.add_argument("--GNNs_GPR", action="store_false")
-    parser.add_argument("--GNNs_LearnMask", action="store_false")
+    parser.add_argument("--GNNs_LearnMask", default=False, type=bool)
     parser.add_argument("--GNNs_PMA", default=True, type=bool)
     parser.add_argument("--GNNs_MLP_hidden", default=256, type=int)
     parser.add_argument("--GNNs_num_MLP_layers", default=2, type=int)
     parser.add_argument("--GNNs_heads", default=4, type=int)
     parser.add_argument("--GNNs_classifier_hidden", default=256, type=int)
     parser.add_argument("--GNNs_num_classifier_layers", default=2, type=int)
+    parser.add_argument("--GNNs_batch_size", default=64, type=int)
     # GNNs Placeholder
     parser.add_argument("--GNNs_num_features", type=int)
     parser.add_argument("--GNNs_num_classes", type=int)
@@ -51,6 +58,10 @@ def parse_args():
 
     # args for Pretrain
     parser.add_argument("--pretrain_model", default="all-mpnet-base-v2", type=str)
+    
+    
+    # args for display
+    parser.add_argument("--display_step", default=1, type=int)
     
     args = parser.parse_args()
 
