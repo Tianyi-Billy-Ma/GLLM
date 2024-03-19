@@ -4,3 +4,6 @@ models/LLMs/
 **/__pychache__/
 /__pychache__
 .vscode/
+__pychache__/*
+*/__pychache__/
+/__pychache__
