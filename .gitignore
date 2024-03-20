@@ -1,9 +1,7 @@
 data/
 llama/
-models/LLMs/
-**/__pychache__/
-/__pychache__
+models/LLMs/**
+!**/*.py
 .vscode/
-__pychache__/*
-*/__pychache__/
-/__pychache__
+__pycache__/
+**/__pycache__/**

@@ -9,7 +9,7 @@ def parse_args():
     data_dir = osp.join(root_dir, "data")
     raw_data_dir = osp.join(data_dir, "raw")
     processed_data_dir = osp.join(data_dir, "processed")
-    LLMs_dir = osp.join(root_dir, "models", "llms")
+    LLMs_dir = osp.join(root_dir, "models", "LLMs")
     GNNs_dir = osp.join(root_dir, "models", "GNNs")
 
     parser.add_argument("--root_dir", default=root_dir, type=str)
@@ -22,7 +22,8 @@ def parse_args():
     parser.add_argument("--LLMs_dir", default=LLMs_dir)
     parser.add_argument("--LLMs_model_name", default="llama-2-7b", type=str)
     # args for GNNs
-    parser.add_argument("-GNNs_epochs", default=500, type=int)
+    parser.add_argument("--GNNs_model_name", default="AllSetTransformer", type=str)
+    parser.add_argument("-GNNs_epochs", default=300, type=int)
     parser.add_argument("-GNNs_lr", default=0.001, type=float)
     parser.add_argument("-GNNs_wd", default=0.0, type=float)
     parser.add_argument("--GNNs_aug", default="mask", type=str)
@@ -58,11 +59,10 @@ def parse_args():
 
     # args for Pretrain
     parser.add_argument("--pretrain_model", default="all-mpnet-base-v2", type=str)
-    
-    
+
     # args for display
     parser.add_argument("--display_step", default=1, type=int)
-    
+
     args = parser.parse_args()
 
     return args
