@@ -1,3 +1,4 @@
+from json import load
 from src import (
     load_pickle,
     save_pickle,
@@ -39,24 +40,57 @@ def generate_edge_index(table):
     return edge_index
 
 
-def construct_hypergraph(args, tables, embeddings):
+def reverse_edge_index(edge_index):
+    edge_index = edge_index.numpy()
+    edge_index = np.stack([edge_index[1, :], edge_index[0, :]], axis=0)
+    return edge_index
+
+
+def reverse_bipartite_data(hg):
+    x_s, x_t = hg.x_t, hg.x_s  # reverse here
+    edge_index = reverse_edge_index(hg.edge_index)
+    assert edge_index[0, :].max() + 1 == x_s.shape[0], "Nodes mismatch"
+    assert edge_index[1, :].max() + 1 == x_t.shape[0], "Hyperedges mismatch"
+    edge_index = torch.LongTensor(edge_index)
+    return BipartiteData(x_s=x_s, x_t=x_t, edge_index=edge_index)
+
+
+def construct_hypergraph(args, tables, node_embeddings, hyperedge_embeddings):
     hypergraph_list = []
     num_nodes = 0
+    num_he = 0
     for t_idx, (key, val) in enumerate(tables.items()):
         edge_index = generate_edge_index(val)
-        x_s = torch.FloatTensor(
-            embeddings[num_nodes : num_nodes + edge_index[0, :].max() + 1, :]
-        )
+        nidx = edge_index[0, :].max() + 1
+        x_s = torch.FloatTensor(node_embeddings[num_nodes : num_nodes + nidx])
         num_nodes += x_s.shape[0]
         edge_index = torch.LongTensor(edge_index)
         # TODO:  support initialization for hyperedge attribute features.
-        x_t = torch.zeros((edge_index[1].max() + 1, x_s.shape[1]))
+        eidx = edge_index[1, :].max() + 1
+        x_t = torch.FloatTensor(hyperedge_embeddings[num_he : num_he + eidx])
+        num_he += x_t.shape[0]
         hg = BipartiteData(x_s=x_s, x_t=x_t, edge_index=edge_index)
+        hg = reverse_bipartite_data(hg) if args.GNNs_reverse_HG else hg
         hg.x = hg.x_s
         hypergraph_list.append(hg)
-    assert (
-        embeddings == torch.cat([hg.x_s for hg in hypergraph_list], dim=0).numpy()
-    ).all(), "Nodes mismatch"
+    if not args.GNNs_reverse_HG:
+        assert (
+            node_embeddings
+            == torch.cat([hg.x_s for hg in hypergraph_list], dim=0).numpy()
+        ).all(), "Nodes mismatch"
+        assert (
+            hyperedge_embeddings
+            == torch.cat([hg.x_t for hg in hypergraph_list], dim=0).numpy()
+        ).all(), "Hyperedges mismatch"
+    else:
+        assert (
+            node_embeddings
+            == torch.cat([hg.x_t for hg in hypergraph_list], dim=0).numpy()
+        ).all(), "Nodes mismatch"
+        assert (
+            hyperedge_embeddings
+            == torch.cat([hg.x_s for hg in hypergraph_list], dim=0).numpy()
+        ).all(), "Hyperedges mismatch"
     HG = DataLoader(
         hypergraph_list, batch_size=args.GNNs_batch_size, shuffle=False, drop_last=False
     )
@@ -122,21 +156,20 @@ def construct_hypergraph(args, tables, embeddings):
 
 def main(args):
     # Load data saved by pretrain_embedding.py
-    pickle_path = osp.join(
-        args.processed_data_dir, args.dname, "pretrain", f"{args.pretrain_model}.pickle"
-    )
-    dict_tables = load_pickle(pickle_path)
-    t2n_mappings, q2t_mappings, qas, embeddings, tables = (
-        dict_tables["t2n_mappings"],
-        dict_tables["q2t_mappings"],
-        dict_tables["qas"],
-        dict_tables["embeddings"],
-        dict_tables["tables"],
-    )
+    pretrain_dir = osp.join(args.processed_data_dir, args.dname, "pretrain")
+    table_info_path = osp.join(pretrain_dir, "info.pickle")
+    node_embedding_path = osp.join(pretrain_dir, "node_embeddings.pickle")
+    hyperedge_embedding_path = osp.join(pretrain_dir, "hyperedge_embeddings.pickle")
+    node_embeddings = load_pickle(node_embedding_path)
+    hyperedge_embeddings = load_pickle(hyperedge_embedding_path)
+    tables = load_pickle(table_info_path)["tables"]
     # Construct hypergraph
-    HG = construct_hypergraph(args, tables, embeddings)
+    HG = construct_hypergraph(args, tables, node_embeddings, hyperedge_embeddings)
 
-    args.GNNs_num_features = embeddings.shape[1]
+    assert (
+        node_embeddings.shape[1] == hyperedge_embeddings.shape[1]
+    ), "Node and hyperedge embeddings have different dimensions"
+    args.GNNs_num_features = node_embeddings.shape[1]
 
     model = SetGNN(args).to(device)
     optimizer = torch.optim.Adam(
@@ -144,7 +177,6 @@ def main(args):
     )
 
     for epoch in range(args.GNNs_epochs):
-
         model.train()
         optimizer.zero_grad()
 

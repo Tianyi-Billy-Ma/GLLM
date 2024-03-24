@@ -1,13 +1,13 @@
-from datasets import load_dataset, load_from_disk, Dataset as ds
-import os, os.path as osp
+from datasets import Dataset as ds
+import os
+import os.path as osp
 import logging
 import argparse
 import pandas as pd
-from scipy.io.arff import loadarff
-from .preprocess import MessageGenerator
 import torch
 from transformers import AutoTokenizer, AutoModel
 import pickle
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,14 @@ raw_arff_dnames = [
     "heart",
     "diabetes",
 ]
+
+
+def load_passages(path):
+    passages = []
+    data = load_pickle(path)
+    for idx, passage in enumerate(data):
+        passages.append({"id": str(idx), "text": passage})
+    return passages
 
 
 def load_pickle(pickle_path):
@@ -48,197 +56,8 @@ def load_raw_data(args):
     logging.info(f"Loading raw dataset {args.dname}")
     dname = args.dname
     raw_data_dir = args.raw_data_dir
-    file_dir = osp.join(raw_data_dir, dname)
-    if dname == "creditg":
-        dataset = pd.DataFrame(loadarff(file_dir / "dataset_31_credit-g.arff")[0])
-        dataset = byte_to_string_columns(dataset)
-        dataset.rename(columns={"class": "label"}, inplace=True)
-        dataset["label"] = dataset["label"] == "good"
-    elif dname == "blood":
-        columns = {
-            "V1": "recency",
-            "V2": "frequency",
-            "V3": "monetary",
-            "V4": "time",
-            "Class": "label",
-        }
-        dataset = pd.DataFrame(loadarff(file_dir / "php0iVrYT.arff")[0])
-        dataset = byte_to_string_columns(dataset)
-        dataset.rename(columns=columns, inplace=True)
-        dataset["label"] = dataset["label"] == "2"
-    elif dname == "bank":
-        columns = [
-            "age",
-            "job",
-            "marital",
-            "education",
-            "default",
-            "balance",
-            "housing",
-            "loan",
-            "contact",
-            "day",
-            "month",
-            "duration",
-            "campaign",
-            "pdays",
-            "previous",
-            "poutcome",
-        ]
-        columns = {"V" + str(i + 1): v for i, v in enumerate(columns)}
-        file_path = osp.join(file_dir, "phpkIxskf.arff")
-        dataset = pd.DataFrame(loadarff(file_path)[0])
-        dataset = byte_to_string_columns(dataset)
-        dataset.rename(columns=columns, inplace=True)
-        dataset.rename(columns={"Class": "label"}, inplace=True)
-        dataset["label"] = dataset["label"] == "2"
-    elif dname == "jungle":
-        dataset = pd.DataFrame(
-            loadarff(file_dir / "jungle_chess_2pcs_raw_endgame_complete.arff")[0]
-        )
-        dataset = byte_to_string_columns(dataset)
-        dataset.rename(columns={"class": "label"}, inplace=True)
-        dataset["label"] = dataset["label"] == "w"  # Does white win?
-    elif dname == "calhousing":
-        dataset = pd.DataFrame(loadarff(file_dir / "houses.arff")[0])
-        dataset = byte_to_string_columns(dataset)
-        dataset.rename(columns={"median_house_value": "label"}, inplace=True)
-        # Make binary task by labelling upper half as true
-        median_price = dataset["label"].median()
-        dataset["label"] = dataset["label"] > median_price
-    elif dname == "income":
-        columns = [
-            "age",
-            "workclass",
-            "fnlwgt",
-            "education",
-            "education_num",
-            "marital_status",
-            "occupation",
-            "relationship",
-            "race",
-            "sex",
-            "capital_gain",
-            "capital_loss",
-            "hours_per_week",
-            "native_country",
-            "label",
-        ]
-
-        def strip_string_columns(df):
-            df[df.select_dtypes(["object"]).columns] = df.select_dtypes(
-                ["object"]
-            ).apply(lambda x: x.str.strip())
-
-        dataset_train = pd.read_csv(
-            file_dir / "adult.data", names=columns, na_values=["?", " ?"]
-        )
-        dataset_train = dataset_train.drop(columns=["fnlwgt", "education_num"])
-        original_size = len(dataset_train)
-        strip_string_columns(dataset_train)
-        # Multiply all dollar columns by two to adjust for inflation
-        # dataset_train[['capital_gain', 'capital_loss']] = (1.79 * dataset_train[['capital_gain', 'capital_loss']]).astype(int)
-        dataset_train["label"] = dataset_train["label"] == ">50K"
-
-        dataset_test = pd.read_csv(
-            data_dir / "adult.test", names=columns, na_values=["?", " ?"]
-        )
-        dataset_test = dataset_test.drop(columns=["fnlwgt", "education_num"])
-        strip_string_columns(dataset_test)
-        # Note label string in test set contains full stop
-        # dataset_test[['capital_gain', 'capital_loss']] = (1.79 * dataset_test[['capital_gain', 'capital_loss']]).astype(int)
-        dataset_test["label"] = dataset_test["label"] == ">50K."
-
-        dataset_train, dataset_valid = train_test_split(
-            dataset_train, test_size=0.20, random_state=1
-        )
-        dataset = dataset_train
-        assert len(dataset_train) + len(dataset_valid) == original_size
-
-    elif dname == "car":
-        columns = [
-            "buying",
-            "maint",
-            "doors",
-            "persons",
-            "lug_boot",
-            "safety_dict",
-            "label",
-        ]
-        dataset = pd.read_csv(file_dir / "car.data", names=columns)
-        label_dict = {"unacc": 0, "acc": 1, "good": 2, "vgood": 3}
-        dataset["label"] = dataset["label"].replace(label_dict)
-
-    elif dname == "voting":
-        columns = [
-            "label",
-            "handicapped_infants",
-            "water_project_cost_sharing",
-            "adoption_of_the_budget_resolution",
-            "physician_fee_freeze",
-            "el_salvador_aid",
-            "religious_groups_in_schools",
-            "anti_satellite_test_ban",
-            "aid_to_nicaraguan_contras",
-            "mx_missile",
-            "immigration",
-            "synfuels_corporation_cutback",
-            "education_spending",
-            "superfund_right_to_sue",
-            "crime",
-            "duty_free_exports",
-            "export_administration_act_south_africa",
-        ]
-        dataset = pd.read_csv(
-            file_dir / "house-votes-84.data", names=columns, na_values=["?"]
-        )
-        original_size = len(dataset)
-        dataset["label"] = np.where(dataset["label"] == "democrat", 1, 0)
-    elif dname == "wine":
-        columns = [
-            "fixed_acidity",
-            "volatile_acidity",
-            "citric_acid",
-            "residual_sugar",
-            "chlorides",
-            "free_sulfur_dioxide",
-            "total_sulfur_dioxide",
-            "density",
-            "pH",
-            "sulphates",
-            "alcohol",
-            "quality",
-        ]
-        dataset = pd.read_csv(
-            file_dir / "winequality-red.csv", names=columns, skiprows=[0]
-        )
-        original_size = len(dataset)
-        # Adopt grouping from: https://www.kaggle.com/code/vishalyo990/prediction-of-quality-of-wine
-        bins = (2, 6.5, 8)
-        dataset["quality"] = pd.cut(
-            dataset["quality"], bins=bins, labels=[0, 1]
-        ).astype(
-            int
-        )  # bad, good
-        dataset = dataset.rename(columns={"quality": "label"})
-
-    elif dname == "titanic":
-        # Only use training set since no labels for test set
-        dataset = pd.read_csv(file_dir / "train.csv")
-        original_size = len(dataset)
-        dataset = dataset.rename(columns={"Survived": "label"})
-
-    elif dname == "heart":
-        dataset = pd.read_csv(file_dir / "heart.csv")
-        original_size = len(dataset)
-        dataset = dataset.rename(columns={"HeartDisease": "label"})
-
-    elif dname == "diabetes":
-        dataset = pd.read_csv(file_dir / "diabetes.csv")
-        original_size = len(dataset)
-        dataset = dataset.rename(columns={"Outcome": "label"})
-    elif dname == "wikitablequestions":
-        dataset = load_dataset("wikitablequestions", trust_remote_code=True)
+    if dname == "wikitablequestions":
+        dataset = ds.load_dataset("wikitablequestions", trust_remote_code=True)
         from datasets import concatenate_datasets
 
         dataset = concatenate_datasets(
@@ -344,8 +163,8 @@ def generate_emb(args, dataset):
 
 def stat_tables(dataset):
     num_tabs = len(dataset)
-    num_cols = [len(d["table"]["header"]) for d in data]
-    num_rows = [len(d["table"]["rows"]) for d in data]
+    num_cols = [len(d["table"]["header"]) for d in dataset]
+    num_rows = [len(d["table"]["rows"]) for d in dataset]
 
     avg_cols, avg_rows = np.mean(num_cols), np.mean(num_rows)
     min_cols, min_rows = np.min(num_cols), np.min(num_rows)

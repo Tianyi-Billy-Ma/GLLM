@@ -1,69 +1,207 @@
-from src import load_data, load_pickle, save_pickle
-from arguments import parse_args
+from math import trunc
+from numpy import save
+from pyparsing import col
 from sentence_transformers import SentenceTransformer
+import ast
 import os, os.path as osp
+import torch
+import json
+from src import (
+    load_data,
+    load_pickle,
+    save_pickle,
+    generate_node_plaintext_within_tables,
+    generate_hyperedges_plaintext_from_tables,
+    normalize,
+)
+from arguments import parse_args
+from models.LLMs.models import load_retriever
+import logging
+
+logger = logging.getLogger(__name__)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def generate_unique_tables(dataset):
-    qt_mappings = {}
-    unique_ts = {}
     qas = {}
-    for row in dataset:
-        t = row["table"]
-        tname = t["name"]
-        id = row["id"]
-        q = row["question"]
-        a = row["answers"]
-        if tname in unique_ts.keys():
-            assert len(unique_ts[tname]["rows"]) == len(
-                t["rows"]
+    tname2tid, qid2tid, qid2qname = {}, {}, {}
+    tables = {}
+    for id, row in enumerate(dataset):
+        table = row["table"]
+        tname = row["table"]["name"]
+        row_id, q, a = row["id"], row["question"], row["answers"]
+        if tname in tname2tid.keys():
+            tid = tname2tid[tname]
+            assert len(tables[tid]["rows"]) == len(
+                table["rows"]
             ), "Table with same name has different number of rows"
             assert (
-                unique_ts[tname]["header"] == t["header"]
+                tables[tid]["header"] == table["header"]
             ), "Table with same name has different header"
         else:
-            unique_ts[tname] = t
-        qas[id] = {
+            tid = f"table_{len(tables.keys())}"
+            tname2tid[tname] = tid
+            tables[tid] = table
+        qid = f"question_{id}"
+        qas[qid] = {
             "question": q,
-            "answers": a,
+            "answer": a,
         }
-        qt_mappings[id] = tname
-    return unique_ts, qt_mappings, qas
+        qid2tid[qid] = tid
+        qid2qname[qid] = row_id
+    return tables, qas, tname2tid, qid2tid, qid2qname
 
 
-def generate_node_plaintext_within_tables(tables):
-    def generate_node_plaintext_from_table(table):
-        header = table["header"]
-        rows = table["rows"]
-        return [f"{header[i]} is {cell}" for row in rows for i, cell in enumerate(row)]
+def generate_embeddings(args, passages, model, tokenizer):
+    model = model.to(device)
+    model.eval()
+    allids, allembeddings = [], []
+    batch_ids, batch_text = [], []
+    total = 0
+    with torch.no_grad():
+        for passage_id, passage in enumerate(passages):
+            batch_ids.append(str("passsage_id"))
+            text = passage
 
-    return {tname: generate_node_plaintext_from_table(t) for tname, t in tables.items()}
+            if args.LLMs_lowercase:
+                text = text.lower()
+            if args.LLMs_normalize_text:
+                text = normalize(text)
+            batch_text.append(text)
+
+            if (
+                len(batch_text) == args.LLMs_pretrain_batch_size
+                or passage_id == len(passages) - 1
+            ):
+                encoded_batch = tokenizer.batch_encode_plus(
+                    batch_text,
+                    return_tensors="pt",
+                    max_length=args.LLMs_passage_maxlength,
+                    padding=True,
+                    truncation=True,
+                )
+                encoded_batch = {k: v.cuda() for k, v in encoded_batch.items()}
+                embeddings = model(**encoded_batch)
+                embeddings = embeddings.cpu()
+                total += len(batch_ids)
+                allids.extend(batch_ids)
+                allembeddings.append(embeddings)
+                # logger.info(f"Encoded passages {total}/{len(passages)}")
+                print(f"Encoded passages {total}/{len(passages)}")
+                batch_text, batch_ids = [], []
+    allembeddings = torch.cat(allembeddings, dim=0).numpy()
+    return allids, allembeddings
 
 
 if __name__ == "__main__":
     args = parse_args()
-    dataset = load_data(args)
-    unique_ts, q2t_mappings, qas = generate_unique_tables(dataset)
-    dict_nodes_plaintext = generate_node_plaintext_within_tables(unique_ts)
-    nodes = []
-    t2n_mappings = []
-    for key, value in dict_nodes_plaintext.items():
-        nodes.extend(value)
-        t2n_mappings.extend([key] * len(value))
-    model = SentenceTransformer(args.pretrain_model)
-    sentence_embeddings = model.encode(nodes)
-    save_dir = osp.join(args.processed_data_dir, args.dname, "pretrain")
-    if not osp.exists(save_dir):
-        os.makedirs(save_dir)
-    save_path = osp.join(save_dir, f"{args.pretrain_model}.pickle")
-    save_pickle(
-        {
-            "t2n_mappings": t2n_mappings,
-            "q2t_mappings": q2t_mappings,
-            "qas": qas,
-            "embeddings": sentence_embeddings,
-            "tables": unique_ts,
-        },
-        save_path,
+
+    # unique_ts: unique tables in the dataset.  unique_ts[table_name] = table
+    # q2t_mappings: mapping from question id to table name. q2t_mappings[id] = table_name
+    # qas: question-answer pairs. qas[id] = {"question": q, "answers": a}
+    pretrain_dir = osp.join(args.processed_data_dir, args.dname, "pretrain")
+    load_path = osp.join(pretrain_dir, "info.pickle")
+    node_plaintext_path = osp.join(pretrain_dir, "node_plaintext.pickle")
+    hyperedge_plaintext_path = osp.join(pretrain_dir, "hyperedge_plaintext.pickle")
+    if (
+        osp.exists(load_path)
+        and osp.exists(node_plaintext_path)
+        and osp.exists(hyperedge_plaintext_path)
+    ):
+        data = load_pickle(load_path)
+        tables, qas, tname2tid, qid2tid, qid2qname, n2tid = (
+            data["tables"],
+            data["qas"],
+            data["tname2tid"],
+            data["qid2tid"],
+            data["qid2qname"],
+            data["n2tid"],
+        )
+        nodes = load_pickle(node_plaintext_path)
+        hyperedges = load_pickle(hyperedge_plaintext_path)
+    else:
+        dataset = load_data(args)
+        unique_tables, qas, tname2tid, qid2tid, qid2qname = generate_unique_tables(
+            dataset
+        )
+        tables = {}
+        for idx, (key, table) in enumerate(unique_tables.items()):
+            raw_str = load_pickle(
+                osp.join(
+                    args.raw_data_dir, args.dname, "table", f"summary_{idx}.pickle"
+                )
+            )
+            raw_split = raw_str.split("\n")
+            assert len(raw_split) == 4
+            table["title"] = raw_split[1][14:-2]
+            table["summary"] = raw_split[2][16:-1]
+            tables[tname2tid[table["name"]]] = table
+
+        dict_nodes_plaintext = generate_node_plaintext_within_tables(
+            tables, args.LLMs_lowercase, args.LLMs_normalize_text
+        )
+        dict_hyperedges_plaintext = generate_hyperedges_plaintext_from_tables(
+            tables, args.LLMs_lowercase, args.LLMs_normalize_text
+        )
+        nodes, hyperedges = [], []
+        n2tid = {}
+        for tid, value in dict_nodes_plaintext.items():
+            nodes.extend(value)
+            idx = len(n2tid.keys())
+            for i in range(idx, idx + len(value)):
+                n2tid[f"node_{i}"] = tid
+            # t2n_mappings.extend([key] * len(value))
+        for tid, value in dict_hyperedges_plaintext.items():
+            hyperedges.extend(value)
+            idx = len(n2tid.keys())
+            for i, cell in zip(range(idx, idx + len(value)), value):
+                if cell.startswith("[RST]") and cell.endswith("[RED]"):
+                    n2tid[f"row_{i}"] = tid
+                elif cell.startswith("[CST]") and cell.endswith("[CED]"):
+                    n2tid[f"col_{i}"] = tid
+                else:
+                    raise ValueError("Invalid hyperedge")
+        save_pickle(
+            {
+                "tables": tables,
+                "qas": qas,
+                "tname2tid": tname2tid,
+                "qid2tid": qid2tid,
+                "qid2qname": qid2qname,
+                "n2tid": n2tid,
+            },
+            load_path,
+        )
+        save_pickle(nodes, node_plaintext_path)
+        save_pickle(hyperedges, hyperedge_plaintext_path)
+    plain_text = nodes + hyperedges
+    assert len(plain_text) == len(n2tid.keys()), "Number of plain text mismatch"
+    model, tokenizer = load_retriever(args.LLMs_pretrain_model)
+    tokenizer.add_special_tokens(
+        special_tokens_dict={
+            "additional_special_tokens": [
+                "[NST]",  # Node start token
+                "[NED]",  # Node end token
+                "[RST]",  # Row start token
+                "[RED]",  # Row end token
+                "[CST]",  # Column start token
+                "[CED]",  # Node value token
+                "[NULL]",  # Null token
+            ]
+        }
     )
+    model.resize_token_embeddings(len(tokenizer))
+    model = model.to(device)
+    ids, embeddings = generate_embeddings(args, plain_text, model, tokenizer)
+    assert len(ids) == len(plain_text), "Number of embeddings mismatch"
+    node_embeddings = embeddings[: len(nodes)]
+    hyperedge_embeddings = embeddings[len(nodes) :]
+    # node_path = osp.join(save_dir, f"{args.pretrain_model}_node_embeddings.pickle")
+    node_path = osp.join(pretrain_dir, "node_embeddings.pickle")
+    hyperedge_path = osp.join(pretrain_dir, "hyperedge_embeddings.pickle")
+    save_pickle(node_embeddings, node_path)
+    # hyperedge_path = osp.join(
+    #     save_dir, f"{args.pretrain_model}_hyperedge_embeddings.pickle"
+    # )
+    save_pickle(hyperedge_embeddings, hyperedge_path)
     print("")
