@@ -158,8 +158,8 @@ def main(args):
     # Load data saved by pretrain_embedding.py
     pretrain_dir = osp.join(args.processed_data_dir, args.dname, "pretrain")
     table_info_path = osp.join(pretrain_dir, "info.pickle")
-    node_embedding_path = osp.join(pretrain_dir, "node_embeddings.pickle")
-    hyperedge_embedding_path = osp.join(pretrain_dir, "hyperedge_embeddings.pickle")
+    node_embedding_path = osp.join(pretrain_dir, "embeddings_node.pickle")
+    hyperedge_embedding_path = osp.join(pretrain_dir, "embeddings_hyperedge.pickle")
     node_embeddings = load_pickle(node_embedding_path)
     hyperedge_embeddings = load_pickle(hyperedge_embedding_path)
     tables = load_pickle(table_info_path)["tables"]
@@ -207,23 +207,25 @@ def main(args):
             optimizer.step()
 
     model.eval()
-    emb_V, emb_H = [], []
+    emb_V, emb_E = [], []
     with torch.no_grad():
         for batch_idx, batch in enumerate(HG):
             batch.norm = torch.ones((batch.x.shape[0], 1))
             batch = batch.to(device)
-            X_V, X_H = model.forward(batch)
+            X_V, X_E = model.forward(batch)
             emb_V.append(X_V)
-            emb_H.append(X_H)
-    save_dir = osp.join(args.processed_data_dir, args.dname, "pretrain")
-    save_path = osp.join(save_dir, f"{args.GNNs_model_name}.pickle")
-    save_pickle(
-        {
-            "Nodes": torch.cat(emb_V, dim=0).cpu().detach().numpy(),
-            "Hyperedges": torch.cat(emb_H, dim=0).cpu().detach().numpy(),
-        },
-        save_path,
-    )
+            emb_E.append(X_E)
+    save_dir = osp.join(args.processed_data_dir, args.dname, "GNNs")
+    if not osp.exists(save_dir):
+        os.makedirs(save_dir)
+    save_node_path = osp.join(save_dir, f"embeddings_node.pickle")
+    save_hyperedge_path = osp.join(save_dir, f"embeddings_hyperedge.pickle")
+    emb_V = torch.cat(emb_V, dim=0).cpu().detach().numpy()
+    emb_E = torch.cat(emb_E, dim=0).cpu().detach().numpy()
+    if args.GNNs_reverse_HG:
+        emb_V, emb_E = emb_E, emb_V
+    save_pickle(emb_V, save_node_path)
+    save_pickle(emb_E, save_hyperedge_path)
     print("")
 
 

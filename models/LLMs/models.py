@@ -51,7 +51,6 @@ class Contriever(BertModel):
         output_hidden_states=None,
         normalize=False,
     ):
-
         model_output = super().forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -84,16 +83,23 @@ class Retriever:
         self.model = model
         self.tokenizer = tokenizer
 
-    def index_encoded_data(self, index, embedding_files, indexing_batch_size):
+    def index_encoded_data(self, index, embedding_dir, indexing_batch_size):
         logger.info(f"Start data indexing ...")
         allids = []
         allembeddings = np.array([])
+        embedding_types = ["summary", "title", "hyperedge"]
+        embedding_files = [
+            os.path.join(embedding_dir, f"embeddings_{etype}.pickle")
+            for etype in embedding_types
+        ]
+        self.mapping = {etype: [] for etype in embedding_types}
         for idx, file_path in enumerate(embedding_files):
             with open(file_path, "rb") as f:
                 logger.info(f"Loading embeddings from {file_path}")
                 data = pickle.load(f)
                 embeddings = data
-                ids = [i for i in range(embeddings.shape[0])]
+                ids = list(np.arange(embeddings.shape[0]) + len(allids))
+            self.mapping[embedding_types[idx]] = ids
             allids.extend(ids)
             allembeddings = (
                 np.vstack((allembeddings, embeddings))
@@ -108,7 +114,7 @@ class Retriever:
             allembeddings, allids = self.add_embeddings(
                 index, allembeddings, allids, indexing_batch_size
             )
-
+        
         logger.info(f"Data indexing completed")
 
     def embed_queries(self, args, queries):
@@ -163,6 +169,25 @@ class Retriever:
     def setup_retriever(self):
         logger.info(f"Load model from {self.args.LLMs_retriever_model_name}")
         self.model, self.tokenizer = load_retriever(self.args.LLMs_retriever_model_name)
+
+        self.tokenizer.add_special_tokens(
+            special_tokens_dict={
+                "additional_special_tokens": [
+                    "[NST]",  # Node start token
+                    "[NED]",  # Node end token
+                    "[RST]",  # Row start token
+                    "[RED]",  # Row end token
+                    "[CST]",  # Column start token
+                    "[CED]",  # Node value token
+                    "[TST]",  # Title start token
+                    "[TED]",  # Title end token
+                    "[SST]",  # Summary start token
+                    "[SED]",  # Summary end token
+                    "[NULL]",  # Null token
+                ]
+            }
+        )
+        self.model.resize_token_embeddings(len(self.tokenizer))
         self.model = self.model.to(device)
         # self.tokenizer = self.tokenizer.to(device)
 
@@ -179,11 +204,17 @@ class Retriever:
             self.args.processed_data_dir,
             self.args.dname,
         )
-        embedding_path = osp.join(
-            input_paths,
-            "pretrain",
-            f"{self.args.LLMs_pretrain_model}_hyperedge_embeddings.pickle",
-        )
+        # node_embedding_path = osp.join(
+        #     input_paths,
+        #     "GNNs",
+        #     f"node_embeddings.pickle",
+        # )
+        # hyperedge_embedding_path = osp.join(
+        #     input_paths,
+        #     "GNNs",
+        #     f"hyperedge_embeddings.pickle",
+        # )
+        embedding_dir = osp.join(input_paths, "GNNs")
         index_dir = osp.join(input_paths, "retriever")
         index_path = osp.join(index_dir, "index.faiss")
 
@@ -193,7 +224,9 @@ class Retriever:
             print(f"Indexing passages from file {input_paths}")
             start_time = time.time()
             self.index_encoded_data(
-                self.index, [embedding_path], self.args.LLMs_indexing_batch_size
+                self.index,
+                embedding_dir,
+                self.args.LLMs_indexing_batch_size,
             )
             print(f"Indexing time: {time.time() - start_time:.1f}s")
             if self.args.LLMs_save_or_load_index:
@@ -201,7 +234,7 @@ class Retriever:
 
         print("Loading passages")
 
-        passages_path = osp.join(input_paths, "pretrain", "passages.pickle")
+        passages_path = osp.join(input_paths, "pretrain", "plaintext_hyperedge.pickle")
         self.passages = load_passages(passages_path)
         self.passage_id_map = {x["id"]: x for x in self.passages}
 
@@ -209,7 +242,6 @@ class Retriever:
 
 
 class Indexer(object):
-
     def __init__(self, vector_sz, n_subquantizers=0, n_bits=8):
         if n_subquantizers > 0:
             self.index = faiss.IndexPQ(

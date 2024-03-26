@@ -13,18 +13,6 @@ logger = logging.getLogger(__name__)
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-raw_arff_dnames = [
-    "bank",
-    "creditg",
-    "blood",
-    "jungle",
-    "calhousing",
-    "income",
-    "car",
-    "heart",
-    "diabetes",
-]
-
 
 def load_passages(path):
     passages = []

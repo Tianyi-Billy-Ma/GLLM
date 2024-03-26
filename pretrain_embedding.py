@@ -1,3 +1,4 @@
+from imp import load_compiled
 from math import trunc
 from numpy import save
 from pyparsing import col
@@ -93,20 +94,25 @@ def generate_embeddings(args, passages, model, tokenizer):
     return allids, allembeddings
 
 
-if __name__ == "__main__":
-    args = parse_args()
-
+def main(args):
     # unique_ts: unique tables in the dataset.  unique_ts[table_name] = table
     # q2t_mappings: mapping from question id to table name. q2t_mappings[id] = table_name
     # qas: question-answer pairs. qas[id] = {"question": q, "answers": a}
     pretrain_dir = osp.join(args.processed_data_dir, args.dname, "pretrain")
     load_path = osp.join(pretrain_dir, "info.pickle")
-    node_plaintext_path = osp.join(pretrain_dir, "node_plaintext.pickle")
-    hyperedge_plaintext_path = osp.join(pretrain_dir, "hyperedge_plaintext.pickle")
+    node_plaintext_path = osp.join(pretrain_dir, "plaintext_node.pickle")
+    hyperedge_plaintext_path = osp.join(pretrain_dir, "plaintext_hyperedge.pickle")
+    # passage_plaintext_path = osp.join(pretrain_dir, "plaintext_passage.pickle")
+    title_plaintext_path = osp.join(pretrain_dir, "plaintext_title.pickle")
+    summary_plaintext_path = osp.join(pretrain_dir, "plaintext_summary.pickle")
     if (
         osp.exists(load_path)
         and osp.exists(node_plaintext_path)
         and osp.exists(hyperedge_plaintext_path)
+        # and osp.exists(passage_plaintext_path)
+        and osp.exists(title_plaintext_path)
+        and osp.exists(summary_plaintext_path)
+        and not args.LLMs_pretrain_reload
     ):
         data = load_pickle(load_path)
         tables, qas, tname2tid, qid2tid, qid2qname, n2tid = (
@@ -119,6 +125,8 @@ if __name__ == "__main__":
         )
         nodes = load_pickle(node_plaintext_path)
         hyperedges = load_pickle(hyperedge_plaintext_path)
+        titles = load_pickle(title_plaintext_path)
+        summaries = load_pickle(summary_plaintext_path)
     else:
         dataset = load_data(args)
         unique_tables, qas, tname2tid, qid2tid, qid2qname = generate_unique_tables(
@@ -133,8 +141,8 @@ if __name__ == "__main__":
             )
             raw_split = raw_str.split("\n")
             assert len(raw_split) == 4
-            table["title"] = raw_split[1][14:-2]
-            table["summary"] = raw_split[2][16:-1]
+            table["title"] = "[TST] " + raw_split[1][14:-2] + " [TED]"
+            table["summary"] = "[SST] " + raw_split[2][16:-1] + " [SED]"
             tables[tname2tid[table["name"]]] = table
 
         dict_nodes_plaintext = generate_node_plaintext_within_tables(
@@ -161,6 +169,10 @@ if __name__ == "__main__":
                     n2tid[f"col_{i}"] = tid
                 else:
                     raise ValueError("Invalid hyperedge")
+            titles, summaries = [], []
+        for tid, table in tables.items():
+            titles.append(table["title"])
+            summaries.append(table["summary"])
         save_pickle(
             {
                 "tables": tables,
@@ -174,8 +186,12 @@ if __name__ == "__main__":
         )
         save_pickle(nodes, node_plaintext_path)
         save_pickle(hyperedges, hyperedge_plaintext_path)
-    plain_text = nodes + hyperedges
-    assert len(plain_text) == len(n2tid.keys()), "Number of plain text mismatch"
+        save_pickle(titles, title_plaintext_path)
+        save_pickle(summaries, summary_plaintext_path)
+        # passages = nodes + hyperedges
+        # save_pickle(passages, passage_plaintext_path)
+    # plain_text = nodes + hyperedges
+    # assert len(plain_text) == len(n2tid.keys()), "Number of plain text mismatch"
     model, tokenizer = load_retriever(args.LLMs_pretrain_model)
     tokenizer.add_special_tokens(
         special_tokens_dict={
@@ -186,22 +202,35 @@ if __name__ == "__main__":
                 "[RED]",  # Row end token
                 "[CST]",  # Column start token
                 "[CED]",  # Node value token
+                "[TST]",  # Title start token
+                "[TED]",  # Title end token
+                "[SST]",  # Summary start token
+                "[SED]",  # Summary end token
                 "[NULL]",  # Null token
             ]
         }
     )
     model.resize_token_embeddings(len(tokenizer))
     model = model.to(device)
-    ids, embeddings = generate_embeddings(args, plain_text, model, tokenizer)
-    assert len(ids) == len(plain_text), "Number of embeddings mismatch"
-    node_embeddings = embeddings[: len(nodes)]
-    hyperedge_embeddings = embeddings[len(nodes) :]
-    # node_path = osp.join(save_dir, f"{args.pretrain_model}_node_embeddings.pickle")
-    node_path = osp.join(pretrain_dir, "node_embeddings.pickle")
-    hyperedge_path = osp.join(pretrain_dir, "hyperedge_embeddings.pickle")
-    save_pickle(node_embeddings, node_path)
-    # hyperedge_path = osp.join(
-    #     save_dir, f"{args.pretrain_model}_hyperedge_embeddings.pickle"
-    # )
-    save_pickle(hyperedge_embeddings, hyperedge_path)
+
+    node_path = osp.join(pretrain_dir, "embeddings_node.pickle")
+    hyperedge_path = osp.join(pretrain_dir, "embeddings_hyperedge.pickle")
+    title_path = osp.join(pretrain_dir, "embeddings_title.pickle")
+    summary_path = osp.join(pretrain_dir, "embeddings_summary.pickle")
+
+    plaintexts = [nodes, hyperedges, titles, summaries]
+    save_paths = [
+        node_path,
+        hyperedge_path,
+        title_path,
+        summary_path,
+    ]
+    for plaintext, save_path in zip(plaintexts, save_paths):
+        ids, embeddings = generate_embeddings(args, plaintext, model, tokenizer)
+        save_pickle(embeddings, save_path)
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(args)
     print("")

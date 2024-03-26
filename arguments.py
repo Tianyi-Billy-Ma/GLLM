@@ -48,6 +48,7 @@ def parse_args():
     parser.add_argument(
         "--LLMs_pretrain_model", default="facebook/contriever-msmarco", type=str
     )
+    parser.add_argument("--LLMs_pretrain_reload", action="store_true")
     parser.add_argument("--LLMs_pretrain_batch_size", default=64, type=int)
     # args for GNNs
     parser.add_argument("--GNNs_model_name", default="AllSetTransformer", type=str)
@@ -67,10 +68,10 @@ def parse_args():
     parser.add_argument("--GNNs_GPR", action="store_false")
     parser.add_argument("--GNNs_LearnMask", default=False, type=bool)
     parser.add_argument("--GNNs_PMA", default=True, type=bool)
-    parser.add_argument("--GNNs_MLP_hidden", default=256, type=int)
+    parser.add_argument("--GNNs_MLP_hidden", default=768, type=int)
     parser.add_argument("--GNNs_num_MLP_layers", default=2, type=int)
     parser.add_argument("--GNNs_heads", default=4, type=int)
-    parser.add_argument("--GNNs_classifier_hidden", default=256, type=int)
+    parser.add_argument("--GNNs_classifier_hidden", default=768, type=int)
     parser.add_argument("--GNNs_num_classifier_layers", default=2, type=int)
     parser.add_argument("--GNNs_batch_size", default=64, type=int)
     # GNNs Placeholder
