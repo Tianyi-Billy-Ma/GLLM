@@ -70,3 +70,32 @@ def generate_plaintext_from_table(tables):
     return "\n".join(
         [f"{header[i]}: {cell}" for row in rows for i, cell in enumerate(row)]
     )
+
+
+node_token_names = ["[NST]", "[NED]"]
+row_token_names = ["[RST]", "[RED]"]
+col_token_names = ["[CST]", "[CED]"]
+title_token_names = ["[TST]", "[TED]"]
+summary_token_names = ["[SST]", "[SED]"]
+null_token_name = "[NULL]"
+
+
+def add_special_token(tokenizer):
+    tokenizer.add_special_tokens(
+        special_tokens_dict={
+            "additional_special_tokens": [
+                "[NST]",  # Node start token
+                "[NED]",  # Node end token
+                "[RST]",  # Row start token
+                "[RED]",  # Row end token
+                "[CST]",  # Column start token
+                "[CED]",  # Node value token
+                "[TST]",  # Title start token
+                "[TED]",  # Title end token
+                "[SST]",  # Summary start token
+                "[SED]",  # Summary end token
+                "[NULL]",  # Null token
+            ]
+        }
+    )
+    return tokenizer

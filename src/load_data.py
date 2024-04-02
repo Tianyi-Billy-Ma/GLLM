@@ -9,9 +9,33 @@ from transformers import AutoTokenizer, AutoModel
 import pickle
 import numpy as np
 
+import json
+
 logger = logging.getLogger(__name__)
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+
+def save_txt(data, path):
+    with open(path, mode="w") as f:
+        f.write(data)
+
+
+def load_txt(path):
+    with open(path, mode="r") as f:
+        data = f.read()
+    return data
+
+
+def save_json(data, path):
+    with open(path, mode="w") as f:
+        json.dump(data, f)
+
+
+def load_json(path):
+    with open(path, mode="r") as f:
+        data = json.load(f)
+    return data
 
 
 def load_passages(path):

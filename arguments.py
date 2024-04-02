@@ -24,6 +24,12 @@ def parse_args():
     parser.add_argument(
         "--LLMs_retriever_model_name", default="facebook/contriever-msmarco", type=str
     )
+    parser.add_argument(
+        "--LLMs_generator_model_name",
+        default=osp.join(LLMs_dir, "llama-2-7b"),
+        type=str,
+    )
+
     parser.add_argument("--LLMs_no_fp16", action="store_true", help="inference in fp32")
     parser.add_argument("--LLMs_projection_size", type=int, default=768)
     parser.add_argument(

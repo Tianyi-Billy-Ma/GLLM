@@ -1,4 +1,3 @@
-
 from torch.utils.data.sampler import BatchSampler
 from torch_geometric.data import Data
 import torch
@@ -21,14 +20,15 @@ class HypergraphBatchSampler(BatchSampler):
 
     def __len__(self):
         return len(self.HGs) // self.batch_size
-    
+
+
 class BipartiteData(Data):
     def __inc__(self, key, value, *args, **kwargs):
-        if key == 'edge_index':
+        if key == "edge_index":
             return torch.tensor([[self.x_s.size(0)], [self.x_t.size(0)]])
         return super().__inc__(key, value, *args, **kwargs)
 
 
-
-
-
+PROMPT_DICT = {
+    "default": ("### Instruction:\n{instruction}\n\n### Response:\n"),
+}
