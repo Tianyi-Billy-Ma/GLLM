@@ -29,8 +29,14 @@ def parse_args():
         default=osp.join(LLMs_dir, "llama-2-7b"),
         type=str,
     )
-
+    parser.add_argument(
+        "--LLMs_world_size",
+        default=1,
+        type=int,
+        help="world size to use multiple GPUs.",
+    )
     parser.add_argument("--LLMs_no_fp16", action="store_true", help="inference in fp32")
+    parser.add_argument("--LLMs_dtype", default="half", type=str)
     parser.add_argument("--LLMs_projection_size", type=int, default=768)
     parser.add_argument(
         "--LLMs_n_subquantizers",
@@ -42,6 +48,7 @@ def parse_args():
         "--LLMs_n_bits", type=int, default=8, help="Number of bits per subquantizer"
     )
     parser.add_argument("--LLMs_save_or_load_index", action="store_false")
+    parser.add_argument("--LLMs_reload_index", action="store_true")
     parser.add_argument("--LLMs_indexing_batch_size", type=int, default=1000000)
     parser.add_argument("--LLMs_lowercase", action="store_true")
     parser.add_argument("--LLMs_normalize_text", action="store_true")

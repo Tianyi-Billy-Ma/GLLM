@@ -4,8 +4,7 @@ import os.path as osp
 
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
-from langchain.llms import OpenAI
-from langchain_openai import ChatOpenAI
+from langchain_openai import OpenAI
 
 from src import load_pickle, save_pickle, save_json
 from arguments import parse_args
@@ -73,7 +72,7 @@ def generate_summary(args):
 
 
 def rephrase_questions(args):
-    llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.3)
+    llm = OpenAI(model_name="gpt-3.5-turbo", temperature=0.3)
 
     # template = """Question: Please provide a detail title and a brief summary for the following table {table}.
     # Please answer in the format of a dictionary with the following keys: title and summary.
@@ -95,20 +94,20 @@ def rephrase_questions(args):
 
     llm_chain = LLMChain(llm=llm, prompt=prompt)
 
-    pickle_path = osp.join(
-        args.processed_data_dir, args.dname, "pretrain", "info.pickle"
+    table_path = osp.join(
+        args.processed_data_dir, args.dname, "pretrain", "plaintext_tables.pickle"
     )
 
-    data = load_pickle(pickle_path)
+    data = load_pickle(table_path)
 
-    tables, qas, tname2tid, qid2tid, qid2qname, n2tid = (
+    tables, qas = (
         data["tables"],
         data["qas"],
-        data["tname2tid"],
-        data["qid2tid"],
-        data["qid2qname"],
-        data["n2tid"],
     )
+
+    qid2tid = load_pickle(
+        osp.join(args.processed_data_dir, args.dname, "pretrain", "mapping.pickle")
+    )["qid2tid"]
 
     save_dir = osp.join(args.raw_data_dir, args.dname, "rephrase")
     if not osp.exists(save_dir):

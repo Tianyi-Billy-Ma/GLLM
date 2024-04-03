@@ -32,3 +32,9 @@ class BipartiteData(Data):
 PROMPT_DICT = {
     "default": ("### Instruction:\n{instruction}\n\n### Response:\n"),
 }
+
+TASK_DICT = {
+    "TableQA": "Given some rows/columns that are extracted from tables in \
+        formats: [RST] evidence [RED] indicates a row and [CST] evidence [CED] indicates a column\
+        answer the question in short.",
+}

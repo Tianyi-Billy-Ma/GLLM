@@ -1,21 +1,21 @@
-from json import load
+from collections import defaultdict
+import os
+import os.path as osp
+import numpy as np
 from src import (
     load_pickle,
-    save_pickle,
-    load_data,
+    save_json,
     aug,
     contrastive_loss_node,
     BipartiteData,
 )
-import os, os.path as osp
 from arguments import parse_args
 import torch
-from tqdm import tqdm
-import numpy as np
+
 import copy
-from torch_geometric.data import Data, DataLoader, Batch
-import torch.nn.functional as F
+from torch_geometric.data import DataLoader
 from models.GNNs.allset import SetGNN
+from src.load_data import save_pickle
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -157,12 +157,22 @@ def construct_hypergraph(args, tables, node_embeddings, hyperedge_embeddings):
 def main(args):
     # Load data saved by pretrain_embedding.py
     pretrain_dir = osp.join(args.processed_data_dir, args.dname, "pretrain")
-    table_info_path = osp.join(pretrain_dir, "info.pickle")
+    table_info_path = osp.join(pretrain_dir, "plaintext_tables.pickle")
+    mapping_path = osp.join(pretrain_dir, "mapping.pickle")
     node_embedding_path = osp.join(pretrain_dir, "embeddings_node.pickle")
     hyperedge_embedding_path = osp.join(pretrain_dir, "embeddings_hyperedge.pickle")
-    node_embeddings = load_pickle(node_embedding_path)
-    hyperedge_embeddings = load_pickle(hyperedge_embedding_path)
-    tables = load_pickle(table_info_path)["tables"]
+    nodes = load_pickle(node_embedding_path)
+    hyperedges = load_pickle(hyperedge_embedding_path)
+
+    nids, node_embeddings = nodes["ids"], nodes["embeddings"]
+    eids, hyperedge_embeddings = hyperedges["ids"], hyperedges["embeddings"]
+
+    input_data = load_pickle(table_info_path)
+    tables = input_data["tables"]
+
+    mappings = load_pickle(mapping_path)
+    nid2tid, eid2tid = mappings["nid2tid"], mappings["eid2tid"]
+
     # Construct hypergraph
     HG = construct_hypergraph(args, tables, node_embeddings, hyperedge_embeddings)
 
@@ -215,17 +225,31 @@ def main(args):
             X_V, X_E = model.forward(batch)
             emb_V.append(X_V)
             emb_E.append(X_E)
+
     save_dir = osp.join(args.processed_data_dir, args.dname, "GNNs")
     if not osp.exists(save_dir):
         os.makedirs(save_dir)
-    save_node_path = osp.join(save_dir, f"embeddings_node.pickle")
-    save_hyperedge_path = osp.join(save_dir, f"embeddings_hyperedge.pickle")
+    save_node_path = osp.join(save_dir, "embeddings_node.pickle")
+    save_hyperedge_path = osp.join(save_dir, "embeddings_hyperedge.pickle")
+
     emb_V = torch.cat(emb_V, dim=0).cpu().detach().numpy()
     emb_E = torch.cat(emb_E, dim=0).cpu().detach().numpy()
     if args.GNNs_reverse_HG:
         emb_V, emb_E = emb_E, emb_V
-    save_pickle(emb_V, save_node_path)
-    save_pickle(emb_E, save_hyperedge_path)
+
+    assert emb_V.shape[0] == len(nids), "Node embeddings mismatch"
+    assert emb_E.shape[0] == len(eids), "Hyperedge embeddings mismatch"
+
+    save_pickle({"ids": nids, "embeddings": emb_V}, save_node_path)
+    save_pickle({"ids": eids, "embeddings": emb_E}, save_hyperedge_path)
+
+    tid2eids = defaultdict(list)
+
+    for eid, tid in eid2tid.items():
+        tid2eids[tid].append(eid)
+
+    save_pickle(tid2eids, osp.join(save_dir, "tid2eids.pickle"))
+
     print("")
 
 

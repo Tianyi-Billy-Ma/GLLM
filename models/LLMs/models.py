@@ -1,3 +1,4 @@
+from json import load
 import logging
 import time
 import os, os.path as osp
@@ -7,7 +8,7 @@ import numpy as np
 import pickle
 import faiss
 from tqdm import tqdm
-from src.load_data import load_passages
+from src.load_data import load_pickle
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -92,14 +93,13 @@ class Retriever:
             os.path.join(embedding_dir, f"embeddings_{etype}.pickle")
             for etype in embedding_types
         ]
-        self.mapping = {etype: [] for etype in embedding_types}
-        for idx, file_path in enumerate(embedding_files):
-            with open(file_path, "rb") as f:
-                logger.info(f"Loading embeddings from {file_path}")
-                data = pickle.load(f)
-                embeddings = data
-                ids = list(np.arange(embeddings.shape[0]) + len(allids))
-            self.mapping[embedding_types[idx]] = ids
+        self.mapping_type2dbids = {}
+        for fidx, file_path in enumerate(embedding_files):
+            logger.info(f"Loading embeddings from {file_path}")
+            data = load_pickle(file_path)
+            ids, embeddings = data["ids"], data["embeddings"]
+
+            self.mapping_type2dbids[embedding_types[fidx]] = ids
             allids.extend(ids)
             allembeddings = (
                 np.vstack((allembeddings, embeddings))
@@ -114,8 +114,29 @@ class Retriever:
             allembeddings, allids = self.add_embeddings(
                 index, allembeddings, allids, indexing_batch_size
             )
-        
+
+        self.mapping_tid2eids = load_pickle(osp.join(embedding_dir, "tid2eids.pickle"))
+        assert sum([len(value) for value in self.mapping_tid2eids.values()]) == len(
+            self.mapping_type2dbids["hyperedge"]
+        ), "Hyperedge embeddings are not properly loaded"
         logger.info(f"Data indexing completed")
+
+    def load_passages(self, passages_dir):
+        passage_types = ["summary", "title", "hyperedge"]
+        passages_files = [
+            os.path.join(passages_dir, f"plaintext_{etype}.pickle")
+            for etype in passage_types
+        ]
+        passages = {}
+        count = 0
+        for fidx, file_path in enumerate(passages_files):
+            logger.info(f"Loading passages from {file_path}")
+            data = load_pickle(file_path)
+            for id, passage in data.items():
+                passages[id] = passage
+            count += len(data.keys())
+        assert count == len(passages.keys()), "Passages are not properly loaded"
+        return passages
 
     def embed_queries(self, args, queries):
         embeddings, batch_questions = [], []
@@ -152,15 +173,73 @@ class Retriever:
         index.index_data(ids_to_add, embeddings_to_add)
         return embeddings, ids
 
-    def search_document(self, query, top_n=10):
+    def search_document(self, query, top_n=30):
         questions_embedding = self.embed_queries(self.args, [query])
 
         start_time = time.time()
-        top_ids_and_scores = self.index.search_knn(
-            questions_embedding, self.args.LLMs_num_docs
+
+        index_id_to_db_ids = self.index.get_id_mapping()
+        ### Step 1: Search with titles:
+        title_ids = self.mapping_type2dbids["title"]
+        title_index_ids = [index_id_to_db_ids[id] for id in title_ids]
+
+        top_title_ids_and_scores = self.index.targeted_search_knn(
+            questions_embedding,
+            title_index_ids,
+            self.args.LLMs_num_docs,
         )
+
+        top_title_ids = top_title_ids_and_scores[0][0][:top_n]
+
+        top_tids_from_titles = [int(id.split("_")[-1]) for id in top_title_ids]
+
+        ### Step 2: Search with summaries:
+        summary_ids = self.mapping_type2dbids["summary"]
+        summary_index_ids = [index_id_to_db_ids[id] for id in summary_ids]
+
+        top_summary_ids_and_scores = self.index.targeted_search_knn(
+            questions_embedding,
+            summary_index_ids,
+            self.args.LLMs_num_docs,
+        )
+
+        top_summary_ids = top_summary_ids_and_scores[0][0][:top_n]
+
+        top_tids_from_summary = [int(id.split("_")[-1]) for id in top_summary_ids]
+
+        # TODO how to combine those two lists?
+
+        top_tids = list(
+            f"table_{id}"
+            for id in set(top_tids_from_titles).intersection(set(top_tids_from_summary))
+        )
+
+        ### Step 3: Search with hyperedges:
+        hyperedge_index_ids = [
+            index_id_to_db_ids[eid]
+            for tid in top_tids
+            for eid in self.mapping_tid2eids[tid]
+        ]
+
+        top_hyperedge_ids_and_scores = self.index.targeted_search_knn(
+            questions_embedding,
+            hyperedge_index_ids,
+            self.args.LLMs_num_docs,
+        )
+
+        top_hyperedge_ids = top_hyperedge_ids_and_scores[0][0][:top_n]
+
         print("Search time: {:.1f}s".format(time.time() - start_time))
-        return self.add_passages(self.passage_id_map, top_ids_and_scores)[:top_n]
+
+        # top_ids_and_scores = self.index.search_knn(
+        #     questions_embedding, self.args.LLMs_num_docs
+        # )
+        # return self.add_passages(self.passages, top_ids_and_scores)[:top_n]
+        return {
+            "title": {id: self.passages[id] for id in top_title_ids},
+            "summary": {id: self.passages[id] for id in top_summary_ids},
+            "hyperedge": {id: self.passages[id] for id in top_hyperedge_ids},
+        }
 
     def add_passages(self, passages, top_passages_and_scores):
         docs = [passages[doc_id] for doc_id in top_passages_and_scores[0][0]]
@@ -204,39 +283,38 @@ class Retriever:
             self.args.processed_data_dir,
             self.args.dname,
         )
-        # node_embedding_path = osp.join(
-        #     input_paths,
-        #     "GNNs",
-        #     f"node_embeddings.pickle",
-        # )
-        # hyperedge_embedding_path = osp.join(
-        #     input_paths,
-        #     "GNNs",
-        #     f"hyperedge_embeddings.pickle",
-        # )
-        embedding_dir = osp.join(input_paths, "GNNs")
+
+        GNNs_dir = osp.join(input_paths, "GNNs")
         index_dir = osp.join(input_paths, "retriever")
         index_path = osp.join(index_dir, "index.faiss")
 
-        if self.args.LLMs_save_or_load_index and os.path.exists(index_path):
+        if (
+            self.args.LLMs_save_or_load_index
+            and os.path.exists(index_path)
+            and (not self.args.LLMs_reload_index)
+        ):
             self.index.deserialize_from(index_dir)
         else:
             print(f"Indexing passages from file {input_paths}")
             start_time = time.time()
             self.index_encoded_data(
                 self.index,
-                embedding_dir,
+                GNNs_dir,
                 self.args.LLMs_indexing_batch_size,
             )
             print(f"Indexing time: {time.time() - start_time:.1f}s")
             if self.args.LLMs_save_or_load_index:
                 self.index.serialize(index_dir)
 
+        # titleid2eid_path = osp.join(GNNs_dir, "titleid2eid.pickle")
+        # self.titleid2eid = load_pickle(titleid2eid_path)
+        # summaryid2eid_path = osp.join(GNNs_dir, "summaryid2eid.pickle")
+        # self.summaryid2eid = load_pickle(summaryid2eid_path)
+
         print("Loading passages")
 
-        passages_path = osp.join(input_paths, "pretrain", "plaintext_hyperedge.pickle")
-        self.passages = load_passages(passages_path)
-        self.passage_id_map = {x["id"]: x for x in self.passages}
+        passages_dir = osp.join(input_paths, "pretrain")
+        self.passages = self.load_passages(passages_dir)
 
         logger.info("Passages have been loaded")
 
@@ -280,6 +358,27 @@ class Indexer(object):
             result.extend([(db_ids[i], scores[i]) for i in range(len(db_ids))])
         return result
 
+    def targeted_search_knn(
+        self, query_vectors, ranges, top_docs, index_batch_size=2048
+    ):
+        query_vectors = query_vectors.astype("float32")
+        result = []
+        nbatch = (len(query_vectors) - 1) // index_batch_size + 1
+        for k in tqdm(range(nbatch)):
+            start_idx = k * index_batch_size
+            end_idx = min((k + 1) * index_batch_size, len(query_vectors))
+            q = query_vectors[start_idx:end_idx]
+            id_selector = faiss.IDSelectorArray(ranges)
+            params = faiss.SearchParametersIVF(sel=id_selector)
+            scores, indexes = self.index.search(q, top_docs, params=params)
+            # convert to external ids
+            db_ids = [
+                [str(self.index_id_to_db_id[i]) for i in query_top_idxs]
+                for query_top_idxs in indexes
+            ]
+            result.extend([(db_ids[i], scores[i]) for i in range(len(db_ids))])
+        return result
+
     def serialize(self, dir_path):
         index_file = os.path.join(dir_path, "index.faiss")
         meta_file = os.path.join(dir_path, "index_meta.faiss")
@@ -309,6 +408,11 @@ class Indexer(object):
         # new_ids = np.array(db_ids, dtype=np.int64)
         # self.index_id_to_db_id = np.concatenate((self.index_id_to_db_id, new_ids), axis=0)
         self.index_id_to_db_id.extend(db_ids)
+
+    def get_id_mapping(self):
+        return {
+            db_id: index_id for index_id, db_id in enumerate(self.index_id_to_db_id)
+        }
 
 
 # if __name__ == "__main__":
