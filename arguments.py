@@ -26,9 +26,11 @@ def parse_args():
     )
     parser.add_argument(
         "--LLMs_generator_model_name",
-        default=osp.join(LLMs_dir, "llama-2-7b"),
+        # default=osp.join(LLMs_dir, "llama-2-7b-hf/"),
+        default="meta-llama/Llama-2-7b-hf",
         type=str,
     )
+    parser.add_argument("--LLMs_max_new_tokens", default=15, type=int)
     parser.add_argument(
         "--LLMs_world_size",
         default=1,
@@ -54,7 +56,7 @@ def parse_args():
     parser.add_argument("--LLMs_normalize_text", action="store_true")
     parser.add_argument("--LLMs_passage_batch_size", default=64, type=int)
     parser.add_argument("--LLMs_passage_maxlength", default=512, type=int)
-    parser.add_argument("--LLMs_question_batch_size", default=64, type=int)
+    parser.add_argument("--LLMs_question_batch_size", default=1, type=int)
     parser.add_argument("--LLMs_question_maxlength", default=512, type=int)
     parser.add_argument("--LLMs_num_docs", default=100, type=int)
     # args for Pretrain

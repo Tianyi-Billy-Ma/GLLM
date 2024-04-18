@@ -4,19 +4,10 @@
 			"path": "."
 		},
 		{
-			"path": "../Baselines/TabLLM"
-		},
-		{
 			"path": "../Baselines/self-rag"
 		},
 		{
-			"path": "../HHGNN"
-		},
-		{
 			"path": "../Baselines/hytrel"
-		},
-		{
-			"path": "../Baselines/RAT"
 		}
 	],
 	"settings": {},

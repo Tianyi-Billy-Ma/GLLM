@@ -27,7 +27,7 @@ def generate_prompt(question, evidences):
         documents = evidences
     prompt = PROMPT_DICT["TableQA"]
     return prompt.format_map(
-        {"instruction": instruction, "documents": documents, "question": question}
+        {"instruction": instruction, "table": documents, "question": question}
     )
 
 
@@ -42,11 +42,13 @@ def main(args):
     ]
     curr_time = time.strftime("%Y-%m-%d-%H-%M-%S", time.gmtime())
 
-    output_dir = osp.join(args.root_dir, "output", f"TableTAGQA_{curr_time}")
+    output_dir = osp.join(args.root_dir, "output", f"tableQA_{curr_time}")
     os.makedirs(output_dir, exist_ok=True)
 
     data = load_pickle(osp.join(pretrain_dir, "plaintext_tables.pickle"))
     tables, qas = data["tables"], data["qas"]
+    mappings = load_pickle(osp.join(pretrain_dir, "mapping.pickle"))
+    qid2tid = mappings["qid2tid"]
 
     retriever = Retriever(args)
     retriever.setup_retriever()
@@ -68,19 +70,23 @@ def main(args):
     questions, ground_truths = [], []
     for idx, (qid, qa) in tqdm(enumerate(qas.items())):
         question, ground_truth = qa["question"], qa["answer"][0]
-        if args.LLMs_rephrase_question and qid in rephrase_files:
-            rephrase_dict = load_json(osp.join(raw_dir, "rephrase", f"{qid}.json"))
-            try:
-                question = rephrase_dict["rephrased question"]
-            except:
-                question = question
+
         questions.append(question)
         ground_truths.append(ground_truth)
-        documents = retriever.search_document(question, 15)
-        evidences = documents["hyperedge"]
-        evidences = [
-            re.sub(r"\[.*?\]", "", evidence) for idx, evidence in evidences.items()
-        ]
+        table = tables[qid2tid[qid]]
+
+        evidences = (
+            "|"
+            + "|".join([normalize(head).replace("\n", " ") for head in table["header"]])
+            + "\n"
+        )
+        for row in table["rows"]:
+            evidences += (
+                "|"
+                + "|".join(normalize(element).replace("\n", " ") for element in row)
+                + "\n"
+            )
+
         prompt = generate_prompt(question, evidences)
         prompts.append(prompt)
         if len(prompts) == args.LLMs_question_batch_size or idx == num_questions - 1:
@@ -92,12 +98,13 @@ def main(args):
             save_json(
                 [
                     {
+                        "prompt": prompt,
                         "question": question,
                         "ground_truth": ground_truth,
                         "prediction": prediction,
                     }
-                    for question, ground_truth, prediction in zip(
-                        questions, ground_truths, predictions
+                    for prompt, question, ground_truth, prediction in zip(
+                        prompts, questions, ground_truths, predictions
                     )
                 ],
                 osp.join(output_dir, f"{idx}.json"),

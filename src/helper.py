@@ -30,11 +30,25 @@ class BipartiteData(Data):
 
 
 PROMPT_DICT = {
-    "default": ("### Instruction:\n{instruction}\n\n### Response:\n"),
+    "QA": ("INSTRUCTION:\n{instruction}\n\nQUESTION:\n{question}\n\nResponse:\n"),
+    "RAGTableQA": (
+        "<s>[INST]<<SYS>>\n"
+        "Instruction: {instruction}\n<</SYS>>\n\n"
+        "Question: {question}\n\n"
+        "Documents: {documents}\n[/INST]\n\n"
+        "Response:"
+    ),
+    "TableQA": (
+        "<s>[INST]<<SYS>>\n"
+        "Instruction: {instruction}\n<</SYS>>\n\n"
+        "Table:\n {table}\n\n"
+        "Question: {question}\n[/INST]\n\n"
+        "Response:"
+    ),
 }
 
 TASK_DICT = {
-    "TableQA": "Given some rows/columns that are extracted from tables in \
-        formats: [RST] evidence [RED] indicates a row and [CST] evidence [CED] indicates a column\
-        answer the question in short.",
+    "RAGTableQA": "Answer the question according the documents. Each line in the documents is a row or column extracted from a table.",
+    "TableQA": "Answer the Question according to the Table.",
+    "QA": "Answer the question in short without explaination.",
 }

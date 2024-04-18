@@ -1,6 +1,7 @@
 import numpy as np
 import re
 from collections import Counter
+import string
 
 
 def exact_match_score(y_pred, y_true, normalize=False):
@@ -18,7 +19,7 @@ def acc_score(y_preds, labels):
     match_count = 0
     for y_pred, label in zip(y_preds, labels):
         y_true = label[0]
-        if pred == y_true:
+        if y_pred == y_true:
             match_count += 1
     return 100 * (match_count / len(y_preds))
 
@@ -26,10 +27,9 @@ def acc_score(y_preds, labels):
 def f1_score(decoded_preds, decoded_labels):
     res = []
     for prediction, answers in zip(decoded_preds, decoded_labels):
-        if type(ans) == list:
-            if type(answers) == list:
-                assert len(answers) > 0, "No valid answers found."
-                res.append(np.max([qa_f1_score(prediction, gt) for gt in answers]))
+        if type(prediction) == list and type(answers) == list:
+            assert len(answers) > 0, "No valid answers found."
+            res.append(np.max([qa_f1_score(prediction, gt) for gt in answers]))
         else:
             res.append(np.max([qa_f1_score(prediction, gt) for gt in answers]))
     return 100 * np.mean(res)

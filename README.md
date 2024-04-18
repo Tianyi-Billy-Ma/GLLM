@@ -17,3 +17,10 @@ Min number of cols/rows: 3.00/4.00
 Memo:
 
 Table too long issue: idx 844, 1171, 1285, 1316 
+
+
+
+
+Performance:
+
+

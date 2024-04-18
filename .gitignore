@@ -5,3 +5,7 @@ models/LLMs/**
 .vscode/
 __pycache__/
 **/__pycache__/**
+**/output/
+**/output/**
+**/output/**/*.json
+
