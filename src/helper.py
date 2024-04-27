@@ -29,26 +29,4 @@ class BipartiteData(Data):
         return super().__inc__(key, value, *args, **kwargs)
 
 
-PROMPT_DICT = {
-    "QA": ("INSTRUCTION:\n{instruction}\n\nQUESTION:\n{question}\n\nResponse:\n"),
-    "RAGTableQA": (
-        "<s>[INST]<<SYS>>\n"
-        "Instruction: {instruction}\n<</SYS>>\n\n"
-        "Question: {question}\n\n"
-        "Documents: {documents}\n[/INST]\n\n"
-        "Response:"
-    ),
-    "TableQA": (
-        "<s>[INST]<<SYS>>\n"
-        "Instruction: {instruction}\n<</SYS>>\n\n"
-        "Table:\n {table}\n\n"
-        "Question: {question}\n[/INST]\n\n"
-        "Response:"
-    ),
-}
 
-TASK_DICT = {
-    "RAGTableQA": "Answer the question according the documents. Each line in the documents is a row or column extracted from a table.",
-    "TableQA": "Answer the Question according to the Table.",
-    "QA": "Answer the question in short without explaination.",
-}

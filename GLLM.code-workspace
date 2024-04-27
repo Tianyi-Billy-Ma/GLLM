@@ -8,7 +8,17 @@
 		},
 		{
 			"path": "../Baselines/hytrel"
+		},
+		{
+			"path": "../Baselines/ReasTAP"
+		},
+		{
+			"path": "../Baselines/TabLLM"
 		}
 	],
-	"settings": {},
+	"settings": {
+		"flake8.args": [
+			"--ignore=E501"
+		]
+	},
 }

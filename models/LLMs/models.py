@@ -285,6 +285,7 @@ class Retriever:
         )
 
         GNNs_dir = osp.join(input_paths, "GNNs")
+        pretrain_dir = osp.join(input_paths, "pretrain")
         index_dir = osp.join(input_paths, "retriever")
         index_path = osp.join(index_dir, "index.faiss")
 
@@ -299,7 +300,7 @@ class Retriever:
             start_time = time.time()
             self.index_encoded_data(
                 self.index,
-                GNNs_dir,
+                pretrain_dir,
                 self.args.LLMs_indexing_batch_size,
             )
             print(f"Indexing time: {time.time() - start_time:.1f}s")

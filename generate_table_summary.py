@@ -1,16 +1,15 @@
 from json import load
+from multiprocessing.forkserver import MAXFDS_TO_SEND
 import os
 import os.path as osp
 
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
-from langchain_openai import OpenAI
-
-from src import load_pickle, save_pickle, save_json
+from src import load_pickle, save_pickle, save_json, load_json
 from arguments import parse_args
 import time
 import numpy as np
 import json
+
+from openai import OpenAI
 
 
 def format_table(table):
@@ -26,15 +25,13 @@ def format_table(table):
 
 
 def generate_summary(args):
-    llm = OpenAI(model_name="gpt-3.5-turbo", temperature=0.3)
+    client = OpenAI(
+        api_key=os.environ["OPENAI_API_KEY"],
+    )
 
     template = """Question: Please provide a detail title and a brief summary for the following table {table}. 
     Please answer in the format of a dictionary with the following keys: title and summary. 
     """
-
-    prompt = PromptTemplate.from_template(template)
-
-    llm_chain = LLMChain(llm=llm, prompt=prompt)
 
     pickle_path = osp.join(
         args.processed_data_dir, args.dname, "pretrain", "info.pickle"
@@ -51,15 +48,26 @@ def generate_summary(args):
     for idx, (key, table) in enumerate(tables.items()):
         if str(idx) in saved_file_index:
             continue
-        table = {"header": table["header"], "rows": table["rows"]}
         try:
-            response = llm_chain.run(table=str(table))
+            tabletext = format_table(table)
+            user_input = template.format_map({"table": tabletext})
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": user_input}],
+                max_tokens=200,
+            )
         except Exception as e:
             if e.http_status == 400:
                 print(f"Error in generating summary for table {idx}. Error: {e}")
                 print("tries to remove some rows ")
                 table = {"header": table["header"], "rows": table["rows"][:100]}
-                response = llm_chain.run(table=str(table))
+                tabletext = format_table(table)
+                user_input = template.format_map({"table": tabletext})
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": user_input}],
+                    max_tokens=200,
+                )
         save_pickle(
             response,
             osp.join(save_dir, f"summary_{idx}.pickle"),
@@ -72,27 +80,30 @@ def generate_summary(args):
 
 
 def rephrase_questions(args):
-    llm = OpenAI(model_name="gpt-3.5-turbo", temperature=0.3)
-
     # template = """Question: Please provide a detail title and a brief summary for the following table {table}.
     # Please answer in the format of a dictionary with the following keys: title and summary.
     # """
 
-    template = """Question: Please check whether the question {question} is accurate for table {table} with title {title}. 
+    template = """## Instruction: Please check whether the question is accurate for table. 
     If not, please rephrase the question so that it is accurate to the table.
     For example, the question: how many people stayed at least 3 years in office? is not accurate for table: 
     "header": [ "", "Name", "Took office", "Left office", "Party", "Notes/Events" ], 
     "rows": [ [ "11", "William McCreery", "March 4, 1803", "March 3, 1809", "Democratic Republican", "" ], [ "12", "Alexander McKim", "March 4, 1809", "March 3, 1815", "Democratic Republican", "" ], [ "13", "William Pinkney", "March 4, 1815", "April 18, 1816", "Democratic Republican", "Resigned to accept position as Minister Plenipotentiary to Russia" ], [ "14", "Peter Little", "September 2, 1816", "March 3, 1823", "Democratic Republican", "" ], [ "14", "Peter Little", "March 4, 1823", "March 3, 1825", "Jacksonian DR", "" ], [ "14", "Peter Little", "March 4, 1825", "March 3, 1829", "Adams", "" ], [ "15", "Benjamin C. Howard", "March 4, 1829", "March 3, 1833", "Jacksonian", "" ] ]
     Because the question is too broad, and the more accurate question would be: how many people stayed at least 3 years in office as mayors of Baltimore from 1803 to 1833.
-    Another example, the question: "Which lake in Turkey is deeper, Lake Tuz or Lake Palas Tuzla?"
-    Please answer in the dictionary format with the following keys: origianl question, need to rephrase? and rephrased question.
+    
+    ## Question: {question}
+    
+    ## Table:
+    
+    Title: {title}
+    {table}
+    
+    Please answer in the dictionary format with the following keys: origianl question and rephrased question.
     """
 
-    prompt = PromptTemplate(
-        template=template, input_variables=["table", "title", "question"]
+    client = OpenAI(
+        api_key=os.environ["OPENAI_API_KEY"],
     )
-
-    llm_chain = LLMChain(llm=llm, prompt=prompt)
 
     table_path = osp.join(
         args.processed_data_dir, args.dname, "pretrain", "plaintext_tables.pickle"
@@ -123,27 +134,39 @@ def rephrase_questions(args):
         title = table["title"][6:-6]  # remove the <title> tag
         tabletext = format_table(table)
         question = qa["question"]
-        response = llm_chain.run(table=tabletext, title=title, question=question)
-
         try:
-            response = llm_chain.run(table=str(table), title=title, question=question)
+            user_input = template.format_map(
+                {"question": question, "table": tabletext, "title": title}
+            )
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": user_input}],
+                max_tokens=200,
+            )
         except Exception as e:
-            if e.http_status == 400:
-                print(f"Error in generating summary for table {qid}. Error: {e}")
-                print("tries to remove some rows ")
-                table = {"header": table["header"], "rows": table["rows"][:100]}
-                response = llm_chain.run(
-                    table=str(table), title=title, question=question
-                )
+            print(e)
+            print(f"Error in generating summary for table {qid}. Error: {e}")
+            print("tries to remove some rows ")
+            table = {"header": table["header"], "rows": table["rows"][:100]}
+            tabletext = format_table(table)
+            user_input = template.format_map(
+                {"question": question, "table": tabletext, "title": title}
+            )
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": user_input}],
+            )
         try:
+            response = response.choices[0].message.content
             response = json.loads(response)
+            save_json(
+                response,
+                osp.join(save_dir, f"{qid}.json"),
+            )
         except Exception as e:
             print(f"Error in generating summary for table {qid}. Error: {e}")
+            save_pickle(response, osp.join(save_dir, f"{qid}.pickle"))
             continue
-        save_json(
-            response,
-            osp.join(save_dir, f"{qid}.json"),
-        )
         rest = np.random.choice([1, 2, 3, 4])
         time.sleep(rest)
         if idx % 100 == 0:
@@ -162,9 +185,112 @@ def load_raw(args):
     return data
 
 
+def process_questions(args):
+    raw_question_dir = osp.join(args.raw_data_dir, args.dname, "rephrase")
+    save_dir = osp.join(args.processed_data_dir, args.dname, "pretrain")
+    save_path = osp.join(save_dir, "plaintext_rephrased_questions.pickle")
+    files = os.listdir(raw_question_dir)
+
+    table_path = osp.join(
+        args.processed_data_dir, args.dname, "pretrain", "plaintext_tables.pickle"
+    )
+
+    data = load_pickle(table_path)
+
+    tables, qas = (
+        data["tables"],
+        data["qas"],
+    )
+    rephrased_questions = {}
+    for idx, (qid, qa) in enumerate(qas.items()):
+        if f"{qid}.json" in files:
+            response = load_json(osp.join(raw_question_dir, f"{qid}.json"))
+        elif f"{qid}.pickle" in files:
+            response = load_pickle(osp.join(raw_question_dir, f"{qid}.pickle"))
+            element1 = response.split("\n")[1]
+            element2 = response.split("\n")[2]
+            if '"' in element1 and '"' in element2:
+                while element2[-1] != '"':
+                    element2 = element2[:-1]
+
+                def replace_special_char(element):
+                    indices = [i for i in range(len(element)) if element[i] == '"']
+                    indices = indices[:3] + [indices[-1]]
+                    return "".join(
+                        [
+                            char
+                            if (char != '"') or (char == '"' and i in indices)
+                            else "'"
+                            for i, char in enumerate(element)
+                        ]
+                    )
+
+                element1 = replace_special_char(element1)
+                element2 = replace_special_char(element2)
+                modified_response = "{" + element1 + element2 + "}"
+            else:
+
+                def add_special_char(v1):
+                    index1 = v1.lower().find("original")
+                    if index1 == -1:
+                        index1 = v1.lower().find("rephrased")
+                    index2 = v1.lower().find("question")
+                    index3 = v1.find(":")
+                    index4 = len(v1)
+                    assert index1 != -1 and index2 != -1 and index3 != -1, "Error"
+                    return (
+                        v1[:index1]
+                        + '"'
+                        + v1[index1:index3]
+                        + '":"'
+                        + v1[index3 + 1 : index4]
+                        + '"'
+                    )
+
+                element1 = add_special_char(element1)
+                element2 = add_special_char(element2)
+                modified_response = "{" + element1 + "," + element2 + "}"
+            response = json.loads(modified_response)
+        else:
+            print(f"File {qid} not found.")
+            continue
+        if (
+            "rephrased question" in response.keys()
+            and "original question" in response.keys()
+        ):
+            rephrased_question = response["rephrased question"]
+        elif (
+            "rephrased_question" in response.keys()
+            and "original_question" in response.keys()
+        ):
+            rephrased_question = response["rephrased_question"]
+        elif (
+            "original_question" in response.keys()
+            and "accurate_question" in response.keys()
+        ):
+            rephrased_question = response["accurate_question"]
+        elif (
+            "Origianl question" in response.keys()
+            and "Rephrased question" in response.keys()
+        ):
+            rephrased_question = response["Rephrased question"]
+        elif (
+            "Original Question" in response.keys()
+            and "Rephrased Question" in response.keys()
+        ):
+            rephrased_question = response["Rephrased Question"]
+        else:
+            print(f"File {qid} is not in good format")
+            break
+        rephrased_questions[qid] = rephrased_question
+
+    save_pickle(rephrased_questions, save_path)
+
+
 if __name__ == "__main__":
     args = parse_args()
     # main(args)
     # data = load_raw(args)
-    rephrase_questions(args)
+    # rephrase_questions(args)
+    process_questions(args)
     print("")

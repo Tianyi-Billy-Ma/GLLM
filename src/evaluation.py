@@ -17,35 +17,21 @@ def acc_score(y_preds, labels):
         labels
     ), "Length of predictions and labels should be same."
     match_count = 0
-    for y_pred, label in zip(y_preds, labels):
-        y_true = label[0]
-        if y_pred == y_true:
+    for y_pred, y_true in zip(y_preds, labels):
+        if y_true in y_pred:
             match_count += 1
-    return 100 * (match_count / len(y_preds))
+    return round(100 * (match_count / len(y_preds)), 2)
 
 
 def f1_score(decoded_preds, decoded_labels):
     res = []
-    for prediction, answers in zip(decoded_preds, decoded_labels):
-        if type(prediction) == list and type(answers) == list:
-            assert len(answers) > 0, "No valid answers found."
-            res.append(np.max([qa_f1_score(prediction, gt) for gt in answers]))
-        else:
-            res.append(np.max([qa_f1_score(prediction, gt) for gt in answers]))
-    return 100 * np.mean(res)
-
-
-def qa_f1_score(y_pred, y_true):
-    prediction_tokens = normalize_answer(y_pred).split()
-    ground_truth_tokens = normalize_answer(y_true).split()
-    common = Counter(prediction_tokens) & Counter(ground_truth_tokens)
-    num_same = sum(common.values())
-    if num_same == 0:
-        return 0
-    precision = 1.0 * num_same / len(prediction_tokens)
-    recall = 1.0 * num_same / len(ground_truth_tokens)
+    for pred, label in zip(decoded_preds, decoded_labels):
+        res.append(match(pred, label, True))
+    num_same = sum(res)
+    precision = 1.0 * num_same / len(decoded_preds)
+    recall = 1.0 * num_same / len(decoded_labels)
     f1 = (2 * precision * recall) / (precision + recall)
-    return f1
+    return round(f1 * 100, 2)
 
 
 def normalize_answer(s):
@@ -80,8 +66,11 @@ def find_entity_tags(sentence):
     return results
 
 
-def match(prediction, ground_truth):
-    for gt in ground_truth:
-        if gt in prediction:
-            return 1
-    return 0
+def match(prediction, ground_truth, normalize=False):
+    if normalize:
+        prediction = normalize_answer(prediction)
+        ground_truth = normalize_answer(ground_truth)
+    if ground_truth in prediction:
+        return 1
+    else:
+        return 0

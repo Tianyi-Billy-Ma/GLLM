@@ -24,7 +24,7 @@ def chatgpt():
     res = client.chat.completions.create(model=model, messages=messages, stream=True)
     msg = ""
     for chunk in res:
-        msg += chunk.choices[0].delta.content
+        msg += str(chunk.choices[0].delta.content)
     print(msg)
 
 

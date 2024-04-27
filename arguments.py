@@ -16,18 +16,22 @@ def parse_args():
     parser.add_argument("--seed", default=3, type=int)
     parser.add_argument("--cuda", default=0, type=int)
     # args for task
-    parser.add_argument("--task_mode", default="classification", type=str)
+    parser.add_argument("--task_mode", default="RAGTableQA", type=str)
     parser.add_argument("--test_prop", default=0.2, type=float)
+    # args for save
+    parser.add_argument("--save_output", action="store_true")
     # args for LLMs
     parser.add_argument("--LLMs_dir", default=LLMs_dir)
-    parser.add_argument("--LLMs_model_name", default="llama-2-7b", type=str)
+    parser.add_argument(
+        "--LLMs_model_name", default="meta-llama/Meta-Llama-3-8B-Instruct", type=str
+    )
     parser.add_argument(
         "--LLMs_retriever_model_name", default="facebook/contriever-msmarco", type=str
     )
     parser.add_argument(
         "--LLMs_generator_model_name",
         # default=osp.join(LLMs_dir, "llama-2-7b-hf/"),
-        default="meta-llama/Llama-2-7b-hf",
+        default="meta-llama/Meta-Llama-3-8B-Instruct",
         type=str,
     )
     parser.add_argument("--LLMs_max_new_tokens", default=15, type=int)

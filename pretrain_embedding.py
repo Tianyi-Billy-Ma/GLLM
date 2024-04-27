@@ -1,6 +1,7 @@
 from imp import load_compiled
 from math import trunc
-from numpy import save
+from numpy import add, save
+from tqdm import tqdm
 from pyparsing import col
 from sentence_transformers import SentenceTransformer
 import ast
@@ -16,9 +17,12 @@ from src import (
     generate_hyperedges_plaintext_from_tables,
     normalize,
 )
+from src.preprocess import add_special_token
 from arguments import parse_args
 from models.LLMs.models import load_retriever
 import logging
+
+from src.preprocess import add_special_token
 
 logger = logging.getLogger(__name__)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -61,7 +65,9 @@ def generate_embeddings(args, passages, model, tokenizer):
     batch_ids, batch_text = [], []
     total = 0
     with torch.no_grad():
-        for idx, (passage_id, passage) in enumerate(passages.items()):
+        for idx, (passage_id, passage) in tqdm(
+            enumerate(passages.items()), total=len(passages), desc="Encoding passages"
+        ):
             batch_ids.append(passage_id)
             text = passage
 
@@ -148,8 +154,8 @@ def main(args):
             )
             raw_split = raw_str.split("\n")
             assert len(raw_split) == 4
-            table["title"] = "[TST] " + raw_split[1][14:-2] + " [TED]"
-            table["summary"] = "[SST] " + raw_split[2][16:-1] + " [SED]"
+            table["title"] = "[TITLE] " + raw_split[1][14:-2] + " [/TITLE]"
+            table["summary"] = "[SUMMARY] " + raw_split[2][16:-1] + " [/SUMMARY]"
             tables[tname2tid[table["name"]]] = table
 
         dict_nodes_plaintext = generate_node_plaintext_within_tables(
@@ -176,10 +182,10 @@ def main(args):
         for tid, cell in dict_hyperedges_plaintext.items():
             idx = len(eid2tid.keys())
             for i, value in zip(range(idx, idx + len(cell)), cell):
-                if value.startswith("[RST]") and value.endswith("[RED]"):
+                if value.startswith("[ROW]") and value.endswith("[/ROW]"):
                     eid2tid[f"row_{i}"] = tid
                     hyperedges[f"row_{i}"] = value
-                elif value.startswith("[CST]") and value.endswith("[CED]"):
+                elif value.startswith("[COL]") and value.endswith("[/COL]"):
                     eid2tid[f"col_{i}"] = tid
                     hyperedges[f"col_{i}"] = value
                 else:
@@ -227,23 +233,8 @@ def main(args):
     # plain_text = nodes + hyperedges
     # assert len(plain_text) == len(nid2tid.keys()), "Number of plain text mismatch"
     model, tokenizer = load_retriever(args.LLMs_pretrain_model)
-    tokenizer.add_special_tokens(
-        special_tokens_dict={
-            "additional_special_tokens": [
-                "[NST]",  # Node start token
-                "[NED]",  # Node end token
-                "[RST]",  # Row start token
-                "[RED]",  # Row end token
-                "[CST]",  # Column start token
-                "[CED]",  # Node value token
-                "[TST]",  # Title start token
-                "[TED]",  # Title end token
-                "[SST]",  # Summary start token
-                "[SED]",  # Summary end token
-                "[NULL]",  # Null token
-            ]
-        }
-    )
+    tokenizer = add_special_token(tokenizer)
+
     model.resize_token_embeddings(len(tokenizer))
     model = model.to(device)
 

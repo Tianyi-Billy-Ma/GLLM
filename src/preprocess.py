@@ -18,7 +18,7 @@ def generate_node_plaintext_within_tables(tables, lowercase=True, normalize_text
                     text = text.lower()
                 if normalize_text:
                     text = normalize(text)
-                text = "[NST] " + text + " [NED]"
+                text = "[NODE] " + text + " [/NODE]"
                 res.append(text)
         return res
 
@@ -43,7 +43,7 @@ def generate_hyperedges_plaintext_from_tables(
                 m = m.lower()
             if normalize_text:
                 m = normalize(m)
-            m = "[RST] " + m + " [RED]"
+            m = "[ROW] " + m + " [/ROW]"
             passages.append(m)
         for idx, header in enumerate(headers):
             m = "; ".join(
@@ -53,7 +53,7 @@ def generate_hyperedges_plaintext_from_tables(
                 m = m.lower()
             if normalize_text:
                 m = normalize(m)
-            m = "[CST] " + m + " [CED]"
+            m = "[COL] " + m + " [/COL]"
             passages.append(m)
         return passages
 
@@ -72,30 +72,23 @@ def generate_plaintext_from_table(tables):
     )
 
 
-node_token_names = ["[NST]", "[NED]"]
-row_token_names = ["[RST]", "[RED]"]
-col_token_names = ["[CST]", "[CED]"]
-title_token_names = ["[TST]", "[TED]"]
-summary_token_names = ["[SST]", "[SED]"]
+node_token_names = ["[NODE]", "[/NODE]"]
+row_token_names = ["[ROW]", "[/ROW]"]
+col_token_names = ["[COL]", "[/COL]"]
+title_token_names = ["[TITLE]", "[/TITLE]"]
+summary_token_names = ["[SUMMARY]", "[/SUMMARY]"]
 null_token_name = "[NULL]"
 
 
 def add_special_token(tokenizer):
     tokenizer.add_special_tokens(
         special_tokens_dict={
-            "additional_special_tokens": [
-                "[NST]",  # Node start token
-                "[NED]",  # Node end token
-                "[RST]",  # Row start token
-                "[RED]",  # Row end token
-                "[CST]",  # Column start token
-                "[CED]",  # Node value token
-                "[TST]",  # Title start token
-                "[TED]",  # Title end token
-                "[SST]",  # Summary start token
-                "[SED]",  # Summary end token
-                "[NULL]",  # Null token
-            ]
+            "additional_special_tokens": node_token_names
+            + row_token_names
+            + col_token_names
+            + title_token_names
+            + summary_token_names
+            + [null_token_name]
         }
     )
     return tokenizer

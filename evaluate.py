@@ -7,15 +7,25 @@ from src.evaluation import f1_score, acc_score
 
 
 def main(args):
-    output_dir = osp.join(args.root_dir, "tableQA_2024-04-17-17-50-39")
+    output_dir = osp.join(
+        args.root_dir,
+        "output",
+        "RAGTableQA_Meta-Llama-3-8B-Instruct_2024-04-27-04-49-57",
+    )
     files = os.listdir(output_dir)
     gts, predictions = [], []
     for file in files:
         file_path = osp.join(output_dir, file)
         data = load_json(file_path)
-        gt, prediction = data["ground_truth"], data["answer"]
-        gts.append(gt)
-        predictions.append(prediction.replace("\n", " "))
+        if isinstance(data, dict):
+            gt, prediction = data["ground_truth"], data["prediction"]
+            gts.append(gt)
+            predictions.append(prediction.replace("\n", ""))
+        else:
+            for qa in data:
+                gt, prediction = qa["ground_truth"], qa["prediction"]
+                gts.append(gt)
+                predictions.append(prediction.replace("\n", ""))
     metric = {
         "f1_score": f1_score(predictions, gts),
         "accuracy": acc_score(predictions, gts),
