@@ -1,6 +1,8 @@
 import argparse, os
 import os.path as osp
 
+from src import preprocess
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -16,7 +18,7 @@ def parse_args():
     parser.add_argument("--seed", default=3, type=int)
     parser.add_argument("--cuda", default=0, type=int)
     # args for task
-    parser.add_argument("--task_mode", default="RAGTableQA", type=str)
+    parser.add_argument("--task_mode", default="RAGTable", type=str)
     parser.add_argument("--test_prop", default=0.2, type=float)
     # args for save
     parser.add_argument("--save_output", action="store_true")
@@ -30,7 +32,6 @@ def parse_args():
     )
     parser.add_argument(
         "--LLMs_generator_model_name",
-        # default=osp.join(LLMs_dir, "llama-2-7b-hf/"),
         default="meta-llama/Meta-Llama-3-8B-Instruct",
         type=str,
     )
@@ -69,6 +70,17 @@ def parse_args():
     )
     parser.add_argument("--LLMs_pretrain_reload", action="store_true")
     parser.add_argument("--LLMs_pretrain_batch_size", default=64, type=int)
+    # args for pretrain
+    parser.add_argument("--LLMs_pretrain_include_tags", action="store_true")
+    # args for retriever
+    parser.add_argument("--LLMs_retriever_include_tags", action="store_true")
+    parser.add_argument(
+        "--LLMs_retriever_input_path",
+        default=osp.join(processed_data_dir, "wikitablequestions"),
+    )
+    # args for baseline
+    parser.add_argument("--LLMs_table_plaintext_format", default="md", type=str)
+    parser.add_argument("--GNNs_table_embedding_format", default="all", type=str)
     # args for GNNs
     parser.add_argument("--GNNs_model_name", default="AllSetTransformer", type=str)
     parser.add_argument("-GNNs_epochs", default=300, type=int)

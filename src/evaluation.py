@@ -11,6 +11,13 @@ def exact_match_score(y_pred, y_true, normalize=False):
         res = y_pred == y_true
     return res
 
+def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
+    scores_for_ground_truths = []
+    for gt in ground_truths:
+        score = metric_fn(prediction, gt)
+        scores_for_ground_truths.append(score)
+    return max(scores_for_ground_truths)
+
 
 def acc_score(y_preds, labels):
     assert len(y_preds) == len(
@@ -24,14 +31,28 @@ def acc_score(y_preds, labels):
 
 
 def f1_score(decoded_preds, decoded_labels):
-    res = []
-    for pred, label in zip(decoded_preds, decoded_labels):
-        res.append(match(pred, label, True))
-    num_same = sum(res)
-    precision = 1.0 * num_same / len(decoded_preds)
-    recall = 1.0 * num_same / len(decoded_labels)
+    f1_all = []
+    for prediction, answers in zip(decoded_preds, decoded_labels):
+        if type(answers) == list:
+            if len(answers) == 0:
+                return 0
+            f1_all.append(np.max([qa_f1_score(prediction, gt) for gt in answers]))
+        else:
+            f1_all.append(qa_f1_score(prediction, answers))
+    return 100 * np.mean(f1_all)
+
+
+def qa_f1_score(prediction, ground_truth):
+    prediction_tokens = normalize_answer(prediction).split()
+    ground_truth_tokens = normalize_answer(ground_truth).split()
+    common = Counter(prediction_tokens) & Counter(ground_truth_tokens)
+    num_same = sum(common.values())
+    if num_same == 0:
+        return 0
+    precision = 1.0 * num_same / len(prediction_tokens)
+    recall = 1.0 * num_same / len(ground_truth_tokens)
     f1 = (2 * precision * recall) / (precision + recall)
-    return round(f1 * 100, 2)
+    return f1
 
 
 def normalize_answer(s):
@@ -66,11 +87,8 @@ def find_entity_tags(sentence):
     return results
 
 
-def match(prediction, ground_truth, normalize=False):
-    if normalize:
-        prediction = normalize_answer(prediction)
-        ground_truth = normalize_answer(ground_truth)
-    if ground_truth in prediction:
-        return 1
-    else:
-        return 0
+def match(prediction, ground_truth):
+    for gt in ground_truth:
+        if gt in prediction:
+            return 1
+    return 0

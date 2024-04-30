@@ -1,5 +1,6 @@
 from json import load
 import logging
+from re import T
 import time
 import os, os.path as osp
 from transformers import AutoConfig, AutoTokenizer, BertModel
@@ -173,10 +174,85 @@ class Retriever:
         index.index_data(ids_to_add, embeddings_to_add)
         return embeddings, ids
 
+    def search_document_batch(self, queries, top_n=30):
+        questions_embedding = self.embed_queries(self.args, queries)
+
+        index_id_to_db_ids = self.index.get_id_mapping()
+
+        ### Step 1: Search with titles:
+        title_ids = self.mapping_type2dbids["title"]
+        title_index_ids = [index_id_to_db_ids[id] for id in title_ids]
+
+        top_title_ids_and_scores = self.index.targeted_search_knn(
+            questions_embedding,
+            title_index_ids,
+            self.args.LLMs_num_docs,
+        )
+
+        top_title_ids = [
+            top_title_ids_and_score[0][:top_n]
+            for top_title_ids_and_score in top_title_ids_and_scores
+        ]
+
+        top_tids_from_title = [
+            [int(id.split("_")[-1]) for id in top_title_id]
+            for top_title_id in top_title_ids
+        ]
+
+        ### Step 2: Search with summaries:
+        summary_ids = self.mapping_type2dbids["summary"]
+        summary_index_ids = [index_id_to_db_ids[id] for id in summary_ids]
+
+        top_summary_ids_and_scores = self.index.targeted_search_knn(
+            questions_embedding,
+            summary_index_ids,
+            self.args.LLMs_num_docs,
+        )
+
+        top_summary_ids = [
+            top_summary_ids_and_score[0][:top_n]
+            for top_summary_ids_and_score in top_summary_ids_and_scores
+        ]
+
+        top_tids_from_summary = [
+            [int(id.split("_")[-1]) for id in top_summary_id]
+            for top_summary_id in top_summary_ids
+        ]
+
+        top_tids = [
+            list(
+                f"table_{id}"
+                for id in set(tids_from_title).intersection(set(tids_from_summary))
+            )
+            for tids_from_title, tids_from_summary in zip(
+                top_tids_from_title, top_tids_from_summary
+            )
+        ]
+
+        ### Step 3: Search with hyperedges:
+        res = []
+        for tids in top_tids:
+            hyperedge_index_ids = [
+                index_id_to_db_ids[eid]
+                for tid in tids
+                for eid in self.mapping_tid2eids[tid]
+            ]
+
+            top_hyperedge_ids_and_scores = self.index.targeted_search_knn(
+                questions_embedding,
+                hyperedge_index_ids,
+                self.args.LLMs_num_docs,
+            )
+
+            top_hyperedge_ids = top_hyperedge_ids_and_scores[0][0][:top_n]
+            res.append(
+                {"hyperedge": {id: self.passages[id] for id in top_hyperedge_ids}}
+            )
+
+        return res
+
     def search_document(self, query, top_n=30):
         questions_embedding = self.embed_queries(self.args, [query])
-
-        start_time = time.time()
 
         index_id_to_db_ids = self.index.get_id_mapping()
         ### Step 1: Search with titles:
@@ -229,8 +305,6 @@ class Retriever:
 
         top_hyperedge_ids = top_hyperedge_ids_and_scores[0][0][:top_n]
 
-        print("Search time: {:.1f}s".format(time.time() - start_time))
-
         # top_ids_and_scores = self.index.search_knn(
         #     questions_embedding, self.args.LLMs_num_docs
         # )
@@ -241,6 +315,45 @@ class Retriever:
             "hyperedge": {id: self.passages[id] for id in top_hyperedge_ids},
         }
 
+    def search_table(self, query, top_n=30):
+        questions_embedding = self.embed_queries(self.args, [query])
+
+        index_id_to_db_ids = self.index.get_id_mapping()
+        ### Step 1: Search with titles:
+        title_ids = self.mapping_type2dbids["title"]
+        title_index_ids = [index_id_to_db_ids[id] for id in title_ids]
+
+        top_title_ids_and_scores = self.index.targeted_search_knn(
+            questions_embedding,
+            title_index_ids,
+            self.args.LLMs_num_docs,
+        )
+
+        top_title_ids = top_title_ids_and_scores[0][0][:top_n]
+
+        top_tids_from_titles = [id for id in top_title_ids]
+
+        ### Step 2: Search with summaries:
+        summary_ids = self.mapping_type2dbids["summary"]
+        summary_index_ids = [index_id_to_db_ids[id] for id in summary_ids]
+
+        top_summary_ids_and_scores = self.index.targeted_search_knn(
+            questions_embedding,
+            summary_index_ids,
+            self.args.LLMs_num_docs,
+        )
+
+        top_summary_ids = top_summary_ids_and_scores[0][0][:top_n]
+
+        top_tids_from_summary = [id for id in top_summary_ids]
+
+        top_tids = list(
+            f"table_{id}"
+            for id in set(top_tids_from_titles).intersection(set(top_tids_from_summary))
+        )
+
+        return {"title": top_tids_from_summary, "summary": top_tids_from_titles}
+
     def add_passages(self, passages, top_passages_and_scores):
         docs = [passages[doc_id] for doc_id in top_passages_and_scores[0][0]]
         return docs
@@ -249,24 +362,25 @@ class Retriever:
         logger.info(f"Load model from {self.args.LLMs_retriever_model_name}")
         self.model, self.tokenizer = load_retriever(self.args.LLMs_retriever_model_name)
 
-        self.tokenizer.add_special_tokens(
-            special_tokens_dict={
-                "additional_special_tokens": [
-                    "[NST]",  # Node start token
-                    "[NED]",  # Node end token
-                    "[RST]",  # Row start token
-                    "[RED]",  # Row end token
-                    "[CST]",  # Column start token
-                    "[CED]",  # Node value token
-                    "[TST]",  # Title start token
-                    "[TED]",  # Title end token
-                    "[SST]",  # Summary start token
-                    "[SED]",  # Summary end token
-                    "[NULL]",  # Null token
-                ]
-            }
-        )
-        self.model.resize_token_embeddings(len(self.tokenizer))
+        if self.args.LLMs_retriever_inclue_tages:
+            node_token_names = ["[NODE]", "[/NODE]"]
+            row_token_names = ["[ROW]", "[/ROW]"]
+            col_token_names = ["[COL]", "[/COL]"]
+            title_token_names = ["[TITLE]", "[/TITLE]"]
+            summary_token_names = ["[SUMMARY]", "[/SUMMARY]"]
+            null_token_name = "[NULL]"
+
+            self.tokenizer.add_special_tokens(
+                special_tokens_dict={
+                    "additional_special_tokens": node_token_names
+                    + row_token_names
+                    + col_token_names
+                    + title_token_names
+                    + summary_token_names
+                    + [null_token_name]
+                }
+            )
+            self.model.resize_token_embeddings(len(self.tokenizer))
         self.model = self.model.to(device)
         # self.tokenizer = self.tokenizer.to(device)
 
@@ -279,10 +393,7 @@ class Retriever:
             self.args.LLMs_n_bits,
         )
 
-        input_paths = osp.join(
-            self.args.processed_data_dir,
-            self.args.dname,
-        )
+        input_paths = self.args.LLMs_retriever_input_path
 
         GNNs_dir = osp.join(input_paths, "GNNs")
         pretrain_dir = osp.join(input_paths, "pretrain")
@@ -300,6 +411,7 @@ class Retriever:
             start_time = time.time()
             self.index_encoded_data(
                 self.index,
+                # GNNs_dir,
                 pretrain_dir,
                 self.args.LLMs_indexing_batch_size,
             )
@@ -346,7 +458,8 @@ class Indexer(object):
         query_vectors = query_vectors.astype("float32")
         result = []
         nbatch = (len(query_vectors) - 1) // index_batch_size + 1
-        for k in tqdm(range(nbatch)):
+        # for k in tqdm(range(nbatch)):
+        for k in range(nbatch):
             start_idx = k * index_batch_size
             end_idx = min((k + 1) * index_batch_size, len(query_vectors))
             q = query_vectors[start_idx:end_idx]
@@ -365,7 +478,8 @@ class Indexer(object):
         query_vectors = query_vectors.astype("float32")
         result = []
         nbatch = (len(query_vectors) - 1) // index_batch_size + 1
-        for k in tqdm(range(nbatch)):
+        # for k in tqdm(range(nbatch)):
+        for k in range(nbatch):
             start_idx = k * index_batch_size
             end_idx = min((k + 1) * index_batch_size, len(query_vectors))
             q = query_vectors[start_idx:end_idx]

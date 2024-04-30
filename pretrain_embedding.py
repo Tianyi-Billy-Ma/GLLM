@@ -95,7 +95,6 @@ def generate_embeddings(args, passages, model, tokenizer):
                 allids.extend(batch_ids)
                 allembeddings.append(embeddings)
                 # logger.info(f"Encoded passages {total}/{len(passages)}")
-                print(f"Encoded passages {total}/{len(passages)}")
                 batch_text, batch_ids = [], []
     allembeddings = torch.cat(allembeddings, dim=0).numpy()
     return allids, allembeddings
@@ -154,8 +153,12 @@ def main(args):
             )
             raw_split = raw_str.split("\n")
             assert len(raw_split) == 4
-            table["title"] = "[TITLE] " + raw_split[1][14:-2] + " [/TITLE]"
-            table["summary"] = "[SUMMARY] " + raw_split[2][16:-1] + " [/SUMMARY]"
+            if args.LLMs_pretrain_include_tags:
+                table["title"] = "[TITLE] " + raw_split[1][14:-2] + " [/TITLE]"
+                table["summary"] = "[SUMMARY] " + raw_split[2][16:-1] + " [/SUMMARY]"
+            else:
+                table["title"] = raw_split[1][14:-2]
+                table["summary"] = raw_split[2][16:-1]
             tables[tname2tid[table["name"]]] = table
 
         dict_nodes_plaintext = generate_node_plaintext_within_tables(
@@ -184,10 +187,16 @@ def main(args):
             for i, value in zip(range(idx, idx + len(cell)), cell):
                 if value.startswith("[ROW]") and value.endswith("[/ROW]"):
                     eid2tid[f"row_{i}"] = tid
-                    hyperedges[f"row_{i}"] = value
+                    if args.LLMs_pretrain_include_tags:
+                        hyperedges[f"row_{i}"] = value[5:-5]
+                    else:
+                        hyperedges[f"row_{i}"] = value
                 elif value.startswith("[COL]") and value.endswith("[/COL]"):
                     eid2tid[f"col_{i}"] = tid
-                    hyperedges[f"col_{i}"] = value
+                    if args.LLMs_pretrain_include_tags:
+                        hyperedges[f"col_{i}"] = value[5:-5]
+                    else:
+                        hyperedges[f"col_{i}"] = value
                 else:
                     raise ValueError("Invalid hyperedge")
         assert sum([len(cell) for _, cell in dict_hyperedges_plaintext.items()]) == len(
