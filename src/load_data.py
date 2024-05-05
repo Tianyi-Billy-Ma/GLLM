@@ -1,4 +1,4 @@
-from datasets import Dataset as ds
+from datasets import load_dataset, load_from_disk
 import os
 import os.path as osp
 import logging
@@ -69,7 +69,7 @@ def load_raw_data(args):
     dname = args.dname
     raw_data_dir = args.raw_data_dir
     if dname == "wikitablequestions":
-        dataset = ds.load_dataset("wikitablequestions", trust_remote_code=True)
+        dataset = load_dataset("wikitablequestions", trust_remote_code=True)
         from datasets import concatenate_datasets
 
         dataset = concatenate_datasets(
@@ -88,7 +88,7 @@ def load_data(args, format=None):
     if format == "pandas":
         dataset = load_raw_data(args)
     elif osp.isdir(data_path) and not args.reprocess:
-        dataset = ds.load_from_disk(data_path)
+        dataset = load_from_disk(data_path)
     else:
         logger.info(
             f"Dataset {args.dname} in {format} format not found. Downloading and saving"

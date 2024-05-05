@@ -1,3 +1,4 @@
+from turtle import forward
 import torch, math
 import torch.nn.functional as F
 from torch import Tensor
@@ -38,7 +39,7 @@ class PMA(MessagePassing):
         negative_slope=0.2,
         dropout=0.0,
         bias=False,
-        **kwargs
+        **kwargs,
     ):
         #         kwargs.setdefault('aggr', 'add')
         super(PMA, self).__init__(node_dim=0, **kwargs)
@@ -233,7 +234,6 @@ class HalfNLHconv(MessagePassing):
     #         self.Prop = S2SProp()
 
     def reset_parameters(self):
-
         if self.attention:
             self.prop.reset_parameters()
         else:
@@ -367,3 +367,227 @@ class MLP(nn.Module):
             x = F.dropout(x, p=self.dropout, training=self.training)
         x = self.lins[-1](x)
         return x
+
+
+class AllSetLayer(MessagePassing):
+    def __init__(self, args, negative_slope=0.2):
+        super(AllSetLayer, self).__init__(node_dim=0)
+
+        self.in_channels = args.GNNs_hidden_dim
+        self.heads = args.GNNs_num_heads
+        self.hidden = args.GNNs_hidden_dim // self.heads
+        self.out_channels = args.GNNs_hidden_dim
+
+        self.negative_slope = negative_slope
+        self.dropout = args.GNNs_dropout
+        self.aggr = "mean"
+
+        self.lin_K = Linear(self.in_channels, self.heads * self.hidden)
+        self.lin_V = Linear(self.in_channels, self.heads * self.hidden)
+        self.att_r = Parameter(torch.Tensor(1, self.heads, self.hidden))  # Seed vector
+        self.rFF = PositionwiseFFN(args)
+
+        self.ln0 = nn.LayerNorm(self.heads * self.hidden)
+        self.ln1 = nn.LayerNorm(self.heads * self.hidden)
+
+        self._alpha = None
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        glorot(self.lin_K.weight)
+        glorot(self.lin_V.weight)
+        self.ln0.reset_parameters()
+        self.ln1.reset_parameters()
+        nn.init.xavier_uniform_(self.att_r)
+
+    def forward(self, x, edge_index):
+        H, C = self.heads, self.hidden
+        alpha_r: OptTensor = None
+
+        assert x.dim() == 2, "Static graphs not supported in `GATConv`."
+        x_K = self.lin_K(x).view(-1, H, C)
+        x_V = self.lin_V(x).view(-1, H, C)
+        alpha_r = (x_K * self.att_r).sum(dim=-1)
+
+        out = self.propagate(edge_index, x=x_V, alpha=alpha_r, aggregate="add")
+
+        alpha = self._alpha
+        self._alpha = None
+        out += self.att_r  # Seed + Multihead
+        # concat heads then LayerNorm.
+        out = self.ln0(out.view(-1, self.heads * self.hidden))
+        # rFF and skip connection.
+        out = self.ln1(out + F.relu(self.rFF(out)))
+        return out
+
+    def message(self, x_j, alpha_j, index, ptr, size_j):
+        #         ipdb.set_trace()
+        alpha = alpha_j
+        alpha = F.leaky_relu(alpha, self.negative_slope)
+        alpha = softmax(alpha, index, ptr, index.max() + 1)
+        self._alpha = alpha
+        alpha = F.dropout(alpha, p=self.dropout, training=self.training)
+        return x_j * alpha.unsqueeze(-1)
+
+    def aggregate(self, inputs, index, dim_size=None, aggregate=None):
+        r"""Aggregates messages from neighbors as
+        :math:`\square_{j \in \mathcal{N}(i)}`.
+
+        Takes in the output of message computation as first argument and any
+        argument which was initially passed to :meth:`propagate`.
+
+        By default, this function will delegate its call to scatter functions
+        that support "add", "mean" and "max" operations as specified in
+        :meth:`__init__` by the :obj:`aggr` argument.
+        """
+        #         ipdb.set_trace()
+        if aggregate is None:
+            raise ValueError("aggr was not passed!")
+        return scatter(inputs, index, dim=self.node_dim, reduce=aggregate)
+
+    def __repr__(self):
+        return "{}({}, {}, heads={})".format(
+            self.__class__.__name__, self.in_channels, self.out_channels, self.heads
+        )
+
+
+class PositionwiseFFN(nn.Module):
+    """The Position-wise FFN layer used in Transformer-like architectures
+
+    If pre_norm is True:
+        norm(data) -> fc1 -> act -> act_dropout -> fc2 -> dropout -> res(+data)
+    Else:
+        data -> fc1 -> act -> act_dropout -> fc2 -> dropout -> norm(res(+data))
+    Also, if we use gated projection. We will use
+        fc1_1 * act(fc1_2(data)) to map the data
+    """
+
+    def __init__(self, args):
+        """
+        Parameters
+        ----------
+        units
+        hidden_size
+        activation_dropout
+        dropout
+        activation
+        normalization
+            layer_norm or no_norm
+        layer_norm_eps
+        pre_norm
+            Pre-layer normalization as proposed in the paper:
+            "[ACL2018] The Best of Both Worlds: Combining Recent Advances in
+             Neural Machine Translation"
+            This will stabilize the training of Transformers.
+            You may also refer to
+            "[Arxiv2020] Understanding the Difficulty of Training Transformers"
+        """
+        super().__init__()
+        self.args = args
+        self.dropout_layer = nn.Dropout(args.GNNs_dropout)
+        self.activation_dropout_layer = nn.Dropout(args.GNNs_dropout)
+        self.ffn_1 = nn.Linear(
+            in_features=args.GNNs_hidden_dim,
+            out_features=args.GNNs_MLP_hidden,
+            bias=True,
+        )
+        if args.GNNs_gated_proj:
+            self.ffn_1_gate = nn.Linear(
+                in_features=args.GNNs_hidden_dim,
+                out_features=args.GNNs_hidden_dim,
+                bias=True,
+            )
+        self.activation = get_activation(args.GNNs_activation_fn)
+        self.ffn_2 = nn.Linear(
+            in_features=args.GNNs_MLP_hidden,
+            out_features=args.GNNs_hidden_dim,
+            bias=True,
+        )
+        self.layer_norm = nn.LayerNorm(
+            eps=args.GNNs_layernorm_eps,
+            normalized_shape=args.GNNs_hidden_dim,
+        )
+        self.init_weights()
+
+    def init_weights(self):
+        for module in self.children():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+    def forward(self, data):
+        """
+
+        Parameters
+        ----------
+        data :
+            Shape (B, seq_length, C_in)
+
+        Returns
+        -------
+        out :
+            Shape (B, seq_length, C_out)
+        """
+        residual = data
+        if self.args.GNNs_pre_norm:
+            data = self.layer_norm(data)
+        if self.args.GNNs_gated_proj:
+            out = self.activation(self.ffn_1_gate(data)) * self.ffn_1(data)
+        else:
+            out = self.activation(self.ffn_1(data))
+        out = self.activation_dropout_layer(out)
+        out = self.ffn_2(out)
+        out = self.dropout_layer(out)
+        out = out + residual
+        if not self.args.GNNs_pre_norm:
+            out = self.layer_norm(out)
+        return out
+
+
+def get_activation(act, inplace=False):
+    """
+
+    Parameters
+    ----------
+    act
+        Name of the activation
+    inplace
+        Whether to perform inplace activation
+
+    Returns
+    -------
+    activation_layer
+        The activation
+    """
+    if act is None:
+        return lambda x: x
+
+    if isinstance(act, str):
+        if act == "leaky":
+            # TODO(sxjscience) Add regex matching here to parse `leaky(0.1)`
+            return nn.LeakyReLU(0.1, inplace=inplace)
+        if act == "identity":
+            return nn.Identity()
+        if act == "elu":
+            return nn.ELU(inplace=inplace)
+        if act == "gelu":
+            return nn.GELU()
+        if act == "relu":
+            return nn.ReLU()
+        if act == "sigmoid":
+            return nn.Sigmoid()
+        if act == "tanh":
+            return nn.Tanh()
+        if act in {"softrelu", "softplus"}:
+            return nn.Softplus()
+        if act == "softsign":
+            return nn.Softsign()
+        raise NotImplementedError(
+            'act="{}" is not supported. '
+            "Try to include it if you can find that in "
+            "https://pytorch.org/docs/stable/nn.html".format(act)
+        )
+
+    return act

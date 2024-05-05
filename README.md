@@ -218,3 +218,9 @@ md + title + node:
 
 {"1": 58.95, "3": 71.4, "5": 75.98, "10": 82.43}
 
+
+
+
+Hypergraph Embeddings + Rephrased Questions
+
+{"1": 0.02, "3": 0.09, "5": 0.18, "10": 0.4}

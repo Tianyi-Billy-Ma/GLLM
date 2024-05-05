@@ -1,3 +1,5 @@
+import re
+
 """
 adapted from chemdataextractor.text.normalize
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -28,8 +30,27 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #: Control characters.
 CONTROLS = {
-    '\u0001', '\u0002', '\u0003', '\u0004', '\u0005', '\u0006', '\u0007', '\u0008', '\u000e', '\u000f', '\u0011',
-    '\u0012', '\u0013', '\u0014', '\u0015', '\u0016', '\u0017', '\u0018', '\u0019', '\u001a', '\u001b',
+    "\u0001",
+    "\u0002",
+    "\u0003",
+    "\u0004",
+    "\u0005",
+    "\u0006",
+    "\u0007",
+    "\u0008",
+    "\u000e",
+    "\u000f",
+    "\u0011",
+    "\u0012",
+    "\u0013",
+    "\u0014",
+    "\u0015",
+    "\u0016",
+    "\u0017",
+    "\u0018",
+    "\u0019",
+    "\u001a",
+    "\u001b",
 }
 # There are further control characters, but they are instead replaced with a space by unicode normalization
 # '\u0009', '\u000a', '\u000b', '\u000c', '\u000d', '\u001c',  '\u001d', '\u001e', '\u001f'
@@ -37,126 +58,147 @@ CONTROLS = {
 
 #: Hyphen and dash characters.
 HYPHENS = {
-    '-',  # \u002d Hyphen-minus
-    '‐',  # \u2010 Hyphen
-    '‑',  # \u2011 Non-breaking hyphen
-    '⁃',  # \u2043 Hyphen bullet
-    '‒',  # \u2012 figure dash
-    '–',  # \u2013 en dash
-    '—',  # \u2014 em dash
-    '―',  # \u2015 horizontal bar
+    "-",  # \u002d Hyphen-minus
+    "‐",  # \u2010 Hyphen
+    "‑",  # \u2011 Non-breaking hyphen
+    "⁃",  # \u2043 Hyphen bullet
+    "‒",  # \u2012 figure dash
+    "–",  # \u2013 en dash
+    "—",  # \u2014 em dash
+    "―",  # \u2015 horizontal bar
 }
 
 #: Minus characters.
 MINUSES = {
-    '-',  # \u002d Hyphen-minus
-    '−',  # \u2212 Minus
-    '－',  # \uff0d Full-width Hyphen-minus
-    '⁻',  # \u207b Superscript minus
+    "-",  # \u002d Hyphen-minus
+    "−",  # \u2212 Minus
+    "－",  # \uff0d Full-width Hyphen-minus
+    "⁻",  # \u207b Superscript minus
 }
 
 #: Plus characters.
 PLUSES = {
-    '+',  # \u002b Plus
-    '＋',  # \uff0b Full-width Plus
-    '⁺',  # \u207a Superscript plus
+    "+",  # \u002b Plus
+    "＋",  # \uff0b Full-width Plus
+    "⁺",  # \u207a Superscript plus
 }
 
 #: Slash characters.
 SLASHES = {
-    '/',  # \u002f Solidus
-    '⁄',  # \u2044 Fraction slash
-    '∕',  # \u2215 Division slash
+    "/",  # \u002f Solidus
+    "⁄",  # \u2044 Fraction slash
+    "∕",  # \u2215 Division slash
 }
 
 #: Tilde characters.
 TILDES = {
-    '~',  # \u007e Tilde
-    '˜',  # \u02dc Small tilde
-    '⁓',  # \u2053 Swung dash
-    '∼',  # \u223c Tilde operator #in mbert vocab
-    '∽',  # \u223d Reversed tilde
-    '∿',  # \u223f Sine wave
-    '〜',  # \u301c Wave dash #in mbert vocab
-    '～',  # \uff5e Full-width tilde #in mbert vocab
+    "~",  # \u007e Tilde
+    "˜",  # \u02dc Small tilde
+    "⁓",  # \u2053 Swung dash
+    "∼",  # \u223c Tilde operator #in mbert vocab
+    "∽",  # \u223d Reversed tilde
+    "∿",  # \u223f Sine wave
+    "〜",  # \u301c Wave dash #in mbert vocab
+    "～",  # \uff5e Full-width tilde #in mbert vocab
 }
 
 #: Apostrophe characters.
 APOSTROPHES = {
     "'",  # \u0027
-    '’',  # \u2019
-    '՚',  # \u055a
-    'Ꞌ',  # \ua78b
-    'ꞌ',  # \ua78c
-    '＇',  # \uff07
+    "’",  # \u2019
+    "՚",  # \u055a
+    "Ꞌ",  # \ua78b
+    "ꞌ",  # \ua78c
+    "＇",  # \uff07
 }
 
 #: Single quote characters.
 SINGLE_QUOTES = {
     "'",  # \u0027
-    '‘',  # \u2018
-    '’',  # \u2019
-    '‚',  # \u201a
-    '‛',  # \u201b
-
+    "‘",  # \u2018
+    "’",  # \u2019
+    "‚",  # \u201a
+    "‛",  # \u201b
 }
 
 #: Double quote characters.
 DOUBLE_QUOTES = {
     '"',  # \u0022
-    '“',  # \u201c
-    '”',  # \u201d
-    '„',  # \u201e
-    '‟',  # \u201f
+    "“",  # \u201c
+    "”",  # \u201d
+    "„",  # \u201e
+    "‟",  # \u201f
 }
 
 #: Accent characters.
 ACCENTS = {
-    '`',  # \u0060
-    '´',  # \u00b4
+    "`",  # \u0060
+    "´",  # \u00b4
 }
 
 #: Prime characters.
 PRIMES = {
-    '′',  # \u2032
-    '″',  # \u2033
-    '‴',  # \u2034
-    '‵',  # \u2035
-    '‶',  # \u2036
-    '‷',  # \u2037
-    '⁗',  # \u2057
+    "′",  # \u2032
+    "″",  # \u2033
+    "‴",  # \u2034
+    "‵",  # \u2035
+    "‶",  # \u2036
+    "‷",  # \u2037
+    "⁗",  # \u2057
 }
 
 #: Quote characters, including apostrophes, single quotes, double quotes, accents and primes.
 QUOTES = APOSTROPHES | SINGLE_QUOTES | DOUBLE_QUOTES | ACCENTS | PRIMES
 
+
 def normalize(text):
     for control in CONTROLS:
-        text = text.replace(control, '')
-    text = text.replace('\u000b', ' ').replace('\u000c', ' ').replace(u'\u0085', ' ')
+        text = text.replace(control, "")
+    text = text.replace("\u000b", " ").replace("\u000c", " ").replace("\u0085", " ")
 
     for hyphen in HYPHENS | MINUSES:
-        text = text.replace(hyphen, '-')
-    text = text.replace('\u00ad', '')
+        text = text.replace(hyphen, "-")
+    text = text.replace("\u00ad", "")
 
     for double_quote in DOUBLE_QUOTES:
         text = text.replace(double_quote, '"')  # \u0022
-    for single_quote in (SINGLE_QUOTES | APOSTROPHES | ACCENTS):
+    for single_quote in SINGLE_QUOTES | APOSTROPHES | ACCENTS:
         text = text.replace(single_quote, "'")  # \u0027
-    text = text.replace('′', "'")     # \u2032 prime
-    text = text.replace('‵', "'")     # \u2035 reversed prime
-    text = text.replace('″', "''")    # \u2033 double prime
-    text = text.replace('‶', "''")    # \u2036 reversed double prime
-    text = text.replace('‴', "'''")   # \u2034 triple prime
-    text = text.replace('‷', "'''")   # \u2037 reversed triple prime
-    text = text.replace('⁗', "''''")  # \u2057 quadruple prime
+    text = text.replace("′", "'")  # \u2032 prime
+    text = text.replace("‵", "'")  # \u2035 reversed prime
+    text = text.replace("″", "''")  # \u2033 double prime
+    text = text.replace("‶", "''")  # \u2036 reversed double prime
+    text = text.replace("‴", "'''")  # \u2034 triple prime
+    text = text.replace("‷", "'''")  # \u2037 reversed triple prime
+    text = text.replace("⁗", "''''")  # \u2057 quadruple prime
 
-    text = text.replace('…', '...').replace(' . . . ', ' ... ')  # \u2026
+    text = text.replace("…", "...").replace(" . . . ", " ... ")  # \u2026
 
     for slash in SLASHES:
-        text = text.replace(slash, '/')
+        text = text.replace(slash, "/")
 
-    #for tilde in TILDES:
+    # for tilde in TILDES:
     #    text = text.replace(tilde, '~')
 
+    number_pattern = re.compile(r"(\d+)\.?(\d*)")  # Matches numbers in decimal form.
+
+    def number_repl(matchobj):
+        """Given a matchobj from number_pattern, it returns a string writing the corresponding number in scientific notation."""
+        pre = matchobj.group(1).lstrip("0")
+        post = matchobj.group(2)
+        if pre and int(pre):
+            # number is >= 1
+            exponent = len(pre) - 1
+        else:
+            # find number of leading zeros to offset.
+            exponent = -re.search("(?!0)", post).start() - 1
+            post = post.lstrip("0")
+        return (pre + post).rstrip("0") + " scinotexp " + str(exponent)
+
+    def apply_scientific_notation(line):
+        """Convert all numbers in a line to scientific notation."""
+        res = re.sub(number_pattern, number_repl, line)
+        return res
+
+    text = apply_scientific_notation(text)
     return text

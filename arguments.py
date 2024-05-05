@@ -60,7 +60,8 @@ def parse_args():
     parser.add_argument("--LLMs_lowercase", action="store_true")
     parser.add_argument("--LLMs_normalize_text", action="store_true")
     parser.add_argument("--LLMs_passage_batch_size", default=64, type=int)
-    parser.add_argument("--LLMs_passage_maxlength", default=512, type=int)
+    parser.add_argument("--LLMs_passage_max_length", default=512, type=int)
+    parser.add_argument("--LLMs_passage_max_token_length", default=512, type=int)
     parser.add_argument("--LLMs_question_batch_size", default=1, type=int)
     parser.add_argument("--LLMs_question_maxlength", default=512, type=int)
     parser.add_argument("--LLMs_num_docs", default=100, type=int)
@@ -68,10 +69,10 @@ def parse_args():
     parser.add_argument(
         "--LLMs_pretrain_model", default="facebook/contriever-msmarco", type=str
     )
-    parser.add_argument("--LLMs_pretrain_reload", action="store_true")
     parser.add_argument("--LLMs_pretrain_batch_size", default=64, type=int)
-    # args for pretrain
+
     parser.add_argument("--LLMs_pretrain_include_tags", action="store_true")
+    parser.add_argument("--LLMs_pretrain_vocab_size", type=int)
     # args for retriever
     parser.add_argument("--LLMs_retriever_include_tags", action="store_true")
     parser.add_argument(
@@ -79,32 +80,27 @@ def parse_args():
         default=osp.join(processed_data_dir, "wikitablequestions"),
     )
     # args for baseline
-    parser.add_argument("--LLMs_table_plaintext_format", default="md", type=str)
+    parser.add_argument("--LLMs_table_plaintext_format", default="dict", type=str)
     parser.add_argument("--GNNs_table_embedding_format", default="all", type=str)
     # args for GNNs
     parser.add_argument("--GNNs_model_name", default="AllSetTransformer", type=str)
-    parser.add_argument("-GNNs_epochs", default=300, type=int)
+    parser.add_argument("-GNNs_epochs", default=5, type=int)
     parser.add_argument("-GNNs_lr", default=0.001, type=float)
     parser.add_argument("-GNNs_wd", default=0.0, type=float)
     parser.add_argument("--GNNs_aug", default="mask", type=str)
     parser.add_argument("--GNNs_aug_ratio", default=0.2, type=float)
     parser.add_argument("--GNNs_tau", default=0.2, type=float)
     parser.add_argument("--GNNs_dir", default=GNNs_dir)
-    parser.add_argument("--GNNs_name", default="GCN", type=str)
-    parser.add_argument("--GNNs_num_layers", default=2, type=int)
-    parser.add_argument("--GNNs_dropout", default=0.5, type=float)
-    parser.add_argument("--GNNs_aggregate", default="mean", type=str)
-    parser.add_argument("--GNNs_normalization", default="ln", type=str)
-    parser.add_argument("--GNNs_input_norm", action="store_false")
-    parser.add_argument("--GNNs_GPR", action="store_false")
-    parser.add_argument("--GNNs_LearnMask", default=False, type=bool)
-    parser.add_argument("--GNNs_PMA", default=True, type=bool)
+    parser.add_argument("--GNNs_num_layers", default=1, type=int)
+    parser.add_argument("--GNNs_dropout", default=0.2, type=float)
+    parser.add_argument("--GNNs_hidden_dim", default=768, type=int)
     parser.add_argument("--GNNs_MLP_hidden", default=768, type=int)
-    parser.add_argument("--GNNs_num_MLP_layers", default=2, type=int)
-    parser.add_argument("--GNNs_heads", default=4, type=int)
-    parser.add_argument("--GNNs_classifier_hidden", default=768, type=int)
-    parser.add_argument("--GNNs_num_classifier_layers", default=2, type=int)
-    parser.add_argument("--GNNs_batch_size", default=64, type=int)
+    parser.add_argument("--GNNs_layernorm_eps", default=1e-12, type=float)
+    parser.add_argument("--GNNs_pre_norm", action="store_true")
+    parser.add_argument("--GNNs_num_heads", default=8, type=int)
+    parser.add_argument("--GNNs_batch_size", default=32, type=int)
+    parser.add_argument("--GNNs_gated_proj", action="store_true")
+    parser.add_argument("-GNNs_activation_fn", default="relu")
     # GNNs Placeholder
     parser.add_argument("--GNNs_num_features", type=int)
     parser.add_argument("--GNNs_num_classes", type=int)

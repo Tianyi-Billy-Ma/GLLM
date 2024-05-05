@@ -17,7 +17,11 @@ import re
 import torch
 from torch_scatter import scatter
 from pretrain_embedding import generate_embeddings
-from src.preprocess import add_special_token, generate_plaintext_from_table
+from src.preprocess import (
+    add_special_token,
+    generate_plaintext_from_table,
+    process_questions,
+)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -98,11 +102,12 @@ class Retriever:
         allids = []
         allembeddings = np.array([])
         embedding_files = [os.path.join(embedding_dir, f"tables.pickle")]
+        self.encoded_data = []
         for fidx, file_path in enumerate(embedding_files):
             logger.info(f"Loading embeddings from {file_path}")
             data = load_pickle(file_path)
             ids, embeddings = data["ids"], data["embedding"]
-
+            self.encoded_data.extend(embeddings)
             allids.extend(ids)
             allembeddings = (
                 np.vstack((allembeddings, embeddings))
@@ -127,6 +132,7 @@ class Retriever:
         for fidx, file_path in enumerate(passages_files):
             logger.info(f"Loading passages from {file_path}")
             data = load_pickle(file_path)
+            data["plaintext"] = ["" for _ in data["ids"]]
             ids, plaintexts = data["ids"], data["plaintext"]
             for id, passage in zip(ids, plaintexts):
                 passages[id] = passage
@@ -253,6 +259,8 @@ class Indexer(object):
 
     def index_data(self, ids, embeddings):
         self._update_id_mapping(ids)
+        if isinstance(embeddings, torch.Tensor):
+            embeddings = embeddings.cpu().numpy()
         embeddings = embeddings.astype("float32")
         if not self.index.is_trained:
             self.index.train(embeddings)
@@ -333,6 +341,7 @@ def run_with_table(args):
         output_dir = osp.join(
             args.root_dir,
             "output",
+            "LLMs",
             f"{args.task_mode}_{save_model_name}_{curr_time}",
         )
         os.makedirs(output_dir, exist_ok=True)
@@ -432,16 +441,14 @@ def main(args):
     pretrain_dir = osp.join(args.processed_data_dir, args.dname, "pretrain")
     output_dir = args.LLMs_retriever_input_path
 
-    data = load_pickle(osp.join(pretrain_dir, "plaintext_tables.pickle"))
+    data = load_pickle(osp.join(pretrain_dir, "plaintext_data.pickle"))
     tables, qas = data["tables"], data["qas"]
 
-    if args.LLMs_rephrase_question:
-        rephrase_questions_path = osp.join(
-            pretrain_dir, "plaintext_rephrased_questions.pickle"
-        )
-        questions = load_pickle(rephrase_questions_path)
-    else:
-        questions = None
+    questions = {}
+    rephrase_questions = process_questions(args)
+    for qid, question in rephrase_questions.items():
+        qas[qid]["question"] = question
+        questions[qid] = question
 
     retriever = Retriever(args)
     retriever.setup_retriever()
@@ -457,7 +464,10 @@ def evaluate_retriever(args):
     output_dir = args.LLMs_retriever_input_path
 
     predictions = load_json(osp.join(output_dir, "predictions.json"))
-    mappings = load_pickle(osp.join(pretrain_dir, "mapping.pickle"))
+
+    data = load_pickle(osp.join(pretrain_dir, "plaintext_data.pickle"))
+
+    mappings = data["mappings"]
     qid2tid = mappings["qid2tid"]
 
     num_questions = len(qid2tid.keys())
@@ -509,6 +519,7 @@ def LLMs_generate_table_embeddings(args):
         output_dir = osp.join(
             args.root_dir,
             "output",
+            "LLMs",
             # f"{args.LLMs_table_plaintext_format}_{save_model_name}_{curr_time}",
             f"oq_{args.LLMs_table_plaintext_format}_{save_model_name}"
             if args.rephrase_question
@@ -655,8 +666,9 @@ def GNNs_generate_table_embeddings(args):
         output_dir = osp.join(
             args.root_dir,
             "output",
+            "GNNs",
             # f"{args.LLMs_table_plaintext_format}_{save_model_name}_{curr_time}",
-            f"GNNs_{args.GNNs_table_embedding_format}",
+            f"{args.GNNs_table_embedding_format}",
         )
         os.makedirs(output_dir, exist_ok=True)
     else:
@@ -731,14 +743,29 @@ if __name__ == "__main__":
     #         args.LLMs_retriever_input_path = output_dir
     #         main(args)
     #         evaluate_retriever(args)
-    for table_format in ["md", "dict", "html", "sentence"]:
-        for sub in ["", "_summary", "_summary_title", "_title"]:
-            table_plaintext_format = table_format + sub
-            args.LLMs_table_plaintext_format = table_plaintext_format
-            for GNNs_table_embedding_format in ["all", "row", "col", "node"]:
-                args.GNNs_table_embedding_format = GNNs_table_embedding_format
-                # output_dir = GNNs_generate_table_embeddings(args)
-                output_dir = combination_embeddings(args)
-                args.LLMs_retriever_input_path = output_dir
-                main(args)
-                evaluate_retriever(args)
+
+    # for table_format in ["md", "dict", "html", "sentence"]:
+    #     for sub in ["", "_summary", "_summary_title", "_title"]:
+    #         table_plaintext_format = table_format + sub
+    #         args.LLMs_table_plaintext_format = table_plaintext_format
+    #         for GNNs_table_embedding_format in ["all", "row", "col", "node"]:
+    #             args.GNNs_table_embedding_format = GNNs_table_embedding_format
+    #             # output_dir = GNNs_generate_table_embeddings(args)
+    #             output_dir = combination_embeddings(args)
+    #             args.LLMs_retriever_input_path = output_dir
+    #             main(args)
+    #             evaluate_retriever(args)
+
+    # save_model_name = args.LLMs_pretrain_model.split("/")[-1]
+    # args.LLMs_retriever_input_path = osp.join(
+    #     args.root_dir, "output", "LLMs", f"dict_summary_title_{save_model_name}"
+    # )
+    # main(args)
+
+    output_dir = "/media/mtybilly/My Passport1/Program/GLLM/output/LLMs/dict_summary_title_contriever-msmarco"
+
+    # output_dir = "/media/mtybilly/My Passport1/Program/GLLM/output/GNNs/table_from_he"
+    args.LLMs_retriever_input_path = output_dir
+
+    main(args)
+    evaluate_retriever(args)

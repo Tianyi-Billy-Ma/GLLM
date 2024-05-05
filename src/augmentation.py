@@ -12,28 +12,25 @@ from torch_geometric.data import Data
 
 
 def permute_edges(data, aug_ratio):
-    node_num, _ = data.x.size()
+    node_num, _ = data.x_s.size()
     _, edge_num = data.edge_index.size()
-    
-    permute_num = int((edge_num - node_num) * aug_ratio)
-    edge_index_orig = copy.deepcopy(data.edge_index)
+
+    permute_num = int(edge_num * aug_ratio)
     edge_index = data.edge_index.cpu().numpy()
 
-    edge2remove_index = np.where(edge_index[1] < data.num_hyperedges[0].item())[0]
-    edge2keep_index = np.where(edge_index[1] >= data.num_hyperedges[0].item())[0]
-    # edge2remove_index = np.where(edge_index[1] < data.num_hyperedges)[0]
-    # edge2keep_index = np.where(edge_index[1] >= data.num_hyperedges)[0]
+    # edge2remove_index = np.where(~np.isin(edge_index[1], edge_index_H))[0]
+    # edge2keep_index = np.where(np.isin(edge_index[1], edge_index_H))[0]
+    edge2remove_index = np.where(edge_index[1] < data.num_hyperedges.sum().item())[0]
+    edge2keep_index = np.where(edge_index[1] >= data.num_hyperedges.sum().item())[0]
 
     try:
-
         edge_keep_index = np.random.choice(
-            edge2remove_index, (edge_num - node_num) - permute_num, replace=False
+            edge2remove_index, edge_num - permute_num, replace=False
         )
 
     except ValueError:
-
         edge_keep_index = np.random.choice(
-            edge2remove_index, (edge_num - node_num) - permute_num, replace=True
+            edge2remove_index, edge_num - permute_num, replace=True
         )
 
     edge_after_remove1 = edge_index[:, edge_keep_index]
@@ -185,16 +182,14 @@ def drop_edge_weighted(
 
 
 def mask_nodes(data, aug_ratio):
-    node_num, feat_dim = data.x.size()
+    node_num, feat_dim = data.x_s.size()
     mask_num = int(node_num * aug_ratio)
 
-    token = data.x.mean(dim=0)
-    zero_v = torch.zeros_like(token)
+    token = torch.zeros_like(data.x_s[0, :])
     idx_mask = np.random.choice(node_num, mask_num, replace=False)
-    data.x[idx_mask] = token
+    data.x_s[idx_mask] = token
 
     return data
-
 
 
 def aug(data, aug_type, aug_ratio=0.2):

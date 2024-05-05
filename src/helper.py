@@ -1,6 +1,7 @@
 from torch.utils.data.sampler import BatchSampler
 from torch_geometric.data import Data
 import torch
+from torch.utils.data import default_collate
 
 
 class HypergraphBatchSampler(BatchSampler):
@@ -22,11 +23,26 @@ class HypergraphBatchSampler(BatchSampler):
         return len(self.HGs) // self.batch_size
 
 
+def hypergraph_collcate_fn(batch):
+    batched_data = default_collate(batch)
+
+    num_hyperedges = torch.sum(batched_data.num_hyperedges)
+    batched_data.num_hyperedges = num_hyperedges
+    return batched_data
+
+
 class BipartiteData(Data):
     def __inc__(self, key, value, *args, **kwargs):
         if key == "edge_index":
             return torch.tensor([[self.x_s.size(0)], [self.x_t.size(0)]])
+        elif key == "edge_index_E":
+            return torch.tensor([[self.x_t.size(0)], [1]])
+        elif key == "edge_index_V":
+            return torch.tensor([[self.x_s.size(0)], [1]])
+        elif key == "edge_index_H":
+            return self.x_t.size(0)
+        elif key == "num_hyperedges":
+            return 0
+        elif key == "hg_idx":
+            return 0
         return super().__inc__(key, value, *args, **kwargs)
-
-
-

@@ -1,4 +1,5 @@
-from .layers import MLP, HalfNLHconv
+from zmq import Message
+from .layers import MLP, HalfNLHconv, AllSetLayer
 import torch
 
 import torch.nn as nn
@@ -7,166 +8,160 @@ import torch.nn.functional as F
 from torch.nn import Linear
 from torch.nn import Parameter
 
+from torch_scatter import scatter
+
 
 class SetGNN(nn.Module):
     def __init__(self, args, norm=None):
         super(SetGNN, self).__init__()
-        """
-        args should contain the following:
-        V_in_dim, V_enc_hid_dim, V_dec_hid_dim, V_out_dim, V_enc_num_layers, V_dec_num_layers
-        E_in_dim, E_enc_hid_dim, E_dec_hid_dim, E_out_dim, E_enc_num_layers, E_dec_num_layers
-        All_num_layers,dropout
-        !!! V_in_dim should be the dimension of node features
-        !!! E_out_dim should be the number of classes (for classification)
-        """
-        #         V_in_dim = V_dict['in_dim']
-        #         V_enc_hid_dim = V_dict['enc_hid_dim']
-        #         V_dec_hid_dim = V_dict['dec_hid_dim']
-        #         V_out_dim = V_dict['out_dim']
-        #         V_enc_num_layers = V_dict['enc_num_layers']
-        #         V_dec_num_layers = V_dict['dec_num_layers']
-
-        #         E_in_dim = E_dict['in_dim']
-        #         E_enc_hid_dim = E_dict['enc_hid_dim']
-        #         E_dec_hid_dim = E_dict['dec_hid_dim']
-        #         E_out_dim = E_dict['out_dim']
-        #         E_enc_num_layers = E_dict['enc_num_layers']
-        #         E_dec_num_layers = E_dict['dec_num_layers']
-
-        #         Now set all dropout the same, but can be different
+        self.args = args
         self.num_layers = args.GNNs_num_layers
-        self.dropout = args.GNNs_dropout
-        self.aggr = args.GNNs_aggregate
-        self.normalization = args.GNNs_normalization
-        self.InputNorm = args.GNNs_input_norm
-        self.GPR = args.GNNs_GPR
-        self.LearnMask = args.GNNs_LearnMask
-        #         Now define V2EConvs[i], V2EConvs[i] for ith layers
-        #         Currently we assume there's no hyperedge features, which means V_out_dim = E_in_dim
-        #         If there's hyperedge features, concat with Vpart decoder output features [V_feat||E_feat]
-        self.V2EConvs = nn.ModuleList()
-        self.E2VConvs = nn.ModuleList()
-        self.bnV2Es = nn.ModuleList()
-        self.bnE2Vs = nn.ModuleList()
-
-        if self.LearnMask:
-            self.Importance = Parameter(torch.ones(norm.size()))
-
-        self.V2EConvs.append(
-            HalfNLHconv(
-                in_dim=args.GNNs_num_features,
-                hid_dim=args.GNNs_MLP_hidden,
-                out_dim=args.GNNs_MLP_hidden,
-                num_layers=args.GNNs_num_MLP_layers,
-                dropout=args.GNNs_dropout,
-                Normalization=args.GNNs_normalization,
-                InputNorm=self.InputNorm,
-                heads=args.GNNs_heads,
-                attention=args.GNNs_PMA,
-            )
+        self.layers = nn.ModuleList(
+            [EncoderLayer(args) for _ in range(self.num_layers)]
         )
-        self.bnV2Es.append(nn.BatchNorm1d(args.GNNs_MLP_hidden))
-        self.E2VConvs.append(
-            HalfNLHconv(
-                in_dim=args.GNNs_MLP_hidden,
-                hid_dim=args.GNNs_MLP_hidden,
-                out_dim=args.GNNs_MLP_hidden,
-                num_layers=args.GNNs_num_MLP_layers,
-                dropout=args.GNNs_dropout,
-                Normalization=args.GNNs_normalization,
-                InputNorm=args.GNNs_input_norm,
-                heads=args.GNNs_heads,
-                attention=args.GNNs_PMA,
-            )
-        )
-        self.bnE2Vs.append(nn.BatchNorm1d(args.GNNs_MLP_hidden))
-        for _ in range(self.num_layers - 1):
-            self.V2EConvs.append(
-                HalfNLHconv(
-                    in_dim=args.GNNs_MLP_hidden,
-                    hid_dim=args.GNNs_MLP_hidden,
-                    out_dim=args.GNNs_MLP_hidden,
-                    num_layers=args.GNNs_num_MLP_layers,
-                    dropout=self.dropout,
-                    Normalization=self.normalization,
-                    InputNorm=self.InputNorm,
-                    heads=args.GNNs_heads,
-                    attention=args.GNNs_PMA,
-                )
-            )
-            self.bnV2Es.append(nn.BatchNorm1d(args.GNNs_MLP_hidden))
-            self.E2VConvs.append(
-                HalfNLHconv(
-                    in_dim=args.GNNs_MLP_hidden,
-                    hid_dim=args.GNNs_MLP_hidden,
-                    out_dim=args.GNNs_MLP_hidden,
-                    num_layers=args.GNNs_num_MLP_layers,
-                    dropout=self.dropout,
-                    Normalization=self.normalization,
-                    InputNorm=self.InputNorm,
-                    heads=args.GNNs_heads,
-                    attention=args.GNNs_PMA,
-                )
-            )
-            self.bnE2Vs.append(nn.BatchNorm1d(args.GNNs_MLP_hidden))
-        if self.GPR:
-            self.MLP = MLP(
-                in_channels=args.GNNs_num_features,
-                hidden_channels=args.GNNs_MLP_hidden,
-                out_channels=args.GNNs_MLP_hidden,
-                num_layers=args.GNNs_num_MLP_layers,
-                dropout=self.dropout,
-                Normalization=self.normalization,
-                InputNorm=False,
-            )
-            self.GPRweights = Linear(self.num_layers + 1, 1, bias=False)
-    #         Now we simply use V_enc_hid=V_dec_hid=E_enc_hid=E_dec_hid
-    #         However, in general this can be arbitrary.
 
     def reset_parameters(self):
-        for layer in self.V2EConvs:
+        for layer in self.layers:
             layer.reset_parameters()
-        for layer in self.E2VConvs:
-            layer.reset_parameters()
-        for layer in self.bnV2Es:
-            layer.reset_parameters()
-        for layer in self.bnE2Vs:
-            layer.reset_parameters()
-        if self.GPR:
-            self.MLP.reset_parameters()
-            self.GPRweights.reset_parameters()
-        if self.LearnMask:
-            nn.init.ones_(self.Importance)
 
     def forward(self, data):
+        edge_index = data.edge_index
+        x_s, x_t = data.x_s, data.x_t
+        num_nodes, num_hyperedges = x_s.size(0), x_t.size(0)
+        self_loop = (
+            torch.LongTensor([[i, num_hyperedges + i] for i in range(num_nodes)])
+            .to(edge_index.device)
+            .T
+        )
+        edge_index = torch.cat([edge_index, self_loop], dim=1)
 
-        x, edge_index, norm = data.x, data.edge_index, data.norm
-        cidx = edge_index[1].min()
-        edge_index[1] -= cidx  # make sure we do not waste memory
+        emb_V, emb_E = x_s, torch.cat([x_t, x_s], dim=0)
+        for i, layer in enumerate(self.layers):
+            emb_V, emb_E = layer(emb_V, emb_E, edge_index)
+        return emb_V, emb_E[:num_hyperedges]
+
+
+class Embedding(nn.Module):
+    def __init__(self, args):
+        super(Embedding, self).__init__()
+        self.embed_tokenizor = nn.Embedding(
+            args.LLMs_pretrain_vocab_size, args.GNNs_hidden_dim, args.pad_token_id
+        )
+        self.norm = nn.LayerNorm(args.GNNs_hidden_dim, eps=args.GNNs_layernorm_eps)
+        self.dropout = nn.Dropout(args.GNNs_dropout)
+
+    def reset_parameters(self):
+        self.embed_tokenizor.reset_parameters()
+        self.norm.reset_parameters()
+
+    def forward(self, x_s, x_t):
+        emb_V, emb_E = self.embed_tokenizor(x_s), self.embed_tokenizor(x_t)
+        emb_V = torch.div(
+            torch.sum(emb_V, dim=1), torch.count_nonzero(x_s, dim=1).unsqueeze(-1)
+        )
+        emb_E = torch.div(
+            torch.sum(emb_E, dim=1), torch.count_nonzero(x_t, dim=1).unsqueeze(-1)
+        )
+
+        emb_V, emb_E = self.norm(emb_V), self.norm(emb_E)
+        emb_V, emb_E = self.dropout(emb_V), self.dropout(emb_E)
+        return emb_V, emb_E
+
+    def forward_(self, x):
+        emb = self.embed_tokenizor(x)
+        emb = torch.div(
+            torch.sum(emb, dim=1), torch.count_nonzero(x, dim=1).unsqueeze(-1)
+        )
+        emb = self.norm(emb)
+        emb = self.dropout(emb)
+        return emb
+
+
+class EncoderLayer(nn.Module):
+    def __init__(self, args):
+        super(EncoderLayer, self).__init__()
+        self.dropout = args.GNNs_dropout
+        # self.V2E = AllSetLayer(args)
+        # self.E2V = AllSetLayer(args)
+
+        self.V2E = nn.Linear(args.GNNs_hidden_dim, args.GNNs_hidden_dim)
+        self.E2V = nn.Linear(args.GNNs_hidden_dim, args.GNNs_hidden_dim)
+
+        self.fuse = nn.Linear(args.GNNs_hidden_dim * 2, args.GNNs_hidden_dim)
+
+    def reset_parameters(self):
+        self.fuse.reset_parameters()
+        self.V2E.reset_parameters()
+        self.E2V.reset_parameters()
+
+    def forward(self, emb_V, emb_E, edge_index):
         reversed_edge_index = torch.stack([edge_index[1], edge_index[0]], dim=0)
 
-        if self.GPR:
-            xs = []
-            xs.append(F.relu(self.MLP(x)))
-            for i, _ in enumerate(self.V2EConvs):
-                x = F.relu(self.V2EConvs[i](x, edge_index, norm, self.aggr))
-                #                 x = self.bnV2Es[i](x)
-                e = F.dropout(x, p=self.dropout, training=self.training)
-                x = self.E2VConvs[i](e, reversed_edge_index, norm, self.aggr)
-                x = F.relu(x)
-                xs.append(x)
-                #                 x = self.bnE2Vs[i](x)
-                x = F.dropout(x, p=self.dropout, training=self.training)
-            x = torch.stack(xs, dim=-1)
-            x = self.GPRweights(x).squeeze()
-            self.embeddings = x
-        else:
-            x = F.dropout(x, p=0.2, training=self.training)  # Input dropout
-            for i, _ in enumerate(self.V2EConvs):
-                x = F.relu(self.V2EConvs[i](x, edge_index, norm, self.aggr))
-                #                 x = self.bnV2Es[i](x)
-                e = F.dropout(x, p=self.dropout, training=self.training)
-                x = F.relu(self.E2VConvs[i](e, reversed_edge_index, norm, self.aggr))
-                #                 x = self.bnE2Vs[i](x)
-                x = F.dropout(x, p=self.dropout, training=self.training)
-        return x, e      
+        emb_E_tem = self.V2E(emb_V)
+
+        emb_E_tem = F.relu(
+            scatter(emb_E_tem[edge_index[0, :]], edge_index[1, :], dim=0, reduce="mean")
+        )
+
+        emb_E = torch.cat([emb_E, emb_E_tem], dim=-1)
+        emb_E = F.dropout(self.fuse(emb_E), p=self.dropout, training=self.training)
+
+        emb_V = self.E2V(emb_E)
+        emb_V = F.relu(
+            scatter(
+                emb_V[reversed_edge_index[0, :]],
+                reversed_edge_index[1, :],
+                dim=0,
+                reduce="mean",
+            )
+        )
+
+        emb_V = F.dropout(emb_V, p=self.dropout, training=self.training)
+        # emb_E_tem = F.relu(self.V2E(emb_V, edge_index))
+
+        # emb_E = torch.cat([emb_E, emb_E_tem], dim=-1)
+
+        # emb_E = F.dropout(self.fuse(emb_E), p=self.dropout, training=self.training)
+
+        # emb_V = F.relu(self.E2V(emb_E, reversed_edge_index))
+        # emb_V = F.dropout(emb_V, p=self.dropout, training=self.training)
+
+        return emb_V, emb_E
+
+
+class Encoder(nn.Module):
+    def __init__(self, args):
+        super(Encoder, self).__init__()
+        self.args = args
+
+        self.num_layers = args.GNNs_num_layers
+
+        self.embed_layer = Embedding(args)
+        self.layers = nn.ModuleList(
+            [EncoderLayer(args) for _ in range(self.num_layers)]
+        )
+
+    def reset_parameters(self):
+        self.embed_layer.reset_parameters()
+        for layer in self.layers:
+            layer.reset_parameters()
+
+    def forward(self, data):
+        emb_V, emb_E = self.embed_layer(data.x_s, data.x_t)
+        emb_E = torch.cat([emb_E, emb_V], dim=0)
+
+        edge_index = data.edge_index
+
+        num_nodes = data.x_s.size(0)
+        num_hyperedges = data.x_t.size(0)
+        self_loop = (
+            torch.LongTensor([[i, num_hyperedges + i] for i in range(num_nodes)])
+            .to(data.edge_index.device)
+            .T
+        )
+        edge_index = torch.cat([edge_index, self_loop], dim=1)
+
+        for i, layer in enumerate(iterable=self.layers):
+            emb_V, emb_E = layer(emb_V, emb_E, edge_index)
+
+        return emb_V, emb_E
