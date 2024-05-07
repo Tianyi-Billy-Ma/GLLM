@@ -369,12 +369,12 @@ def construct_hypergraph(args, tables, passage_dict, model, tokenizer, mappings)
                     hyperedge_embeddings[i]
                     for i, eid in enumerate(eids)
                     if eid in tid2eids[tid]
-                ] + [table_embeddings[t_idx]]
+                ]
+                + [table_embeddings[t_idx]]
             )
             x_s = torch.FloatTensor(x_s)
             x_t = torch.FloatTensor(x_t)
-            
-            
+
         else:
             xs_ids, xt_ids = [], []
 
@@ -431,6 +431,9 @@ def construct_hypergraph(args, tables, passage_dict, model, tokenizer, mappings)
             x_s, x_t = xs_ids, xt_ids
 
         edge_index = torch.LongTensor(edge_index)
+
+        assert edge_index[0, :].max() + 1 == x_s.shape[0], "Nodes mismatch"
+        assert edge_index[1, :].max() + 1 == x_t.shape[0], "Hyperedges mismatch"
 
         hg = BipartiteData(
             x_s=x_s,

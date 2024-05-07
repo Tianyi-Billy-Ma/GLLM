@@ -6,7 +6,8 @@ from transformers import AutoTokenizer, AutoConfig, BertModel
 import faiss
 import pickle
 import numpy as np
-from vllm import LLM, SamplingParams
+
+# from vllm import LLM, SamplingParams
 from arguments import parse_args
 from src.prompt import generate_prompt
 from src.preprocess import add_special_token
@@ -357,12 +358,13 @@ def run_with_table(args):
 
     # tokenzier = add_special_token(tokenzier)
     torch.cuda.empty_cache()
-    model = LLM(
-        model=args.LLMs_generator_model_name,
-        download_dir=args.LLMs_dir,
-        dtype=args.LLMs_dtype,
-        tensor_parallel_size=args.LLMs_world_size,
-    )
+    # model = LLM(
+    #     model=args.LLMs_generator_model_name,
+    #     download_dir=args.LLMs_dir,
+    #     dtype=args.LLMs_dtype,
+    #     tensor_parallel_size=args.LLMs_world_size,
+    # )
+    model = None
     # model.set_tokenizer(tokenzier)
 
     num_questions = len(qas.items())
@@ -393,9 +395,10 @@ def run_with_table(args):
         prompt = generate_prompt(args, question, evidences)
         prompts.append(prompt)
         if len(prompts) == args.LLMs_question_batch_size or idx == num_questions - 1:
-            sampling_params = SamplingParams(
-                temperature=0.0, top_p=1.0, max_tokens=100, stop=["</answer>"]
-            )
+            # sampling_params = SamplingParams(
+            #     temperature=0.0, top_p=1.0, max_tokens=100, stop=["</answer>"]
+            # )
+            sampling_params = None
             response = model.generate(prompts, sampling_params)
             predictions = [normalize(result.outputs[0].text) for result in response]
             if args.save_output:

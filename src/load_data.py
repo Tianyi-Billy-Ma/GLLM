@@ -9,6 +9,8 @@ from transformers import AutoTokenizer, AutoModel
 import pickle
 import numpy as np
 
+import pytorch_lightning as pl
+
 import json
 
 logger = logging.getLogger(__name__)
@@ -186,6 +188,12 @@ def stat_tables(dataset):
     print(f"Average number of cols/rows: {avg_cols:.2f}/{avg_rows:.2f}")
     print(f"Max number of cols/rows: {max_cols:.2f}/{max_rows:.2f}")
     print(f"Min number of cols/rows: {min_cols:.2f}/{min_rows:.2f}")
+
+
+class TableDataModule(pl.LightningDataModule):
+    def __init__(self, tokenizer, data_args, seed, batch_size, py_logger, objective):
+        super().__init__()
+        self.tokenizer = tokenizer
 
 
 if __name__ == "__main__":
