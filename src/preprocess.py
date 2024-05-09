@@ -345,6 +345,8 @@ def construct_hypergraph(args, tables, passage_dict, model, tokenizer, mappings)
         passage_dict["hyperedges"],
     )
 
+    table_passages = passage_dict["tables"]
+
     nids = [nid for nid, _ in node_passages.items()]
     eids = [eid for eid, _ in hyperperedge_passages.items()]
     tids = [tid for tid, _ in tables.items()]
@@ -427,7 +429,7 @@ def construct_hypergraph(args, tables, passage_dict, model, tokenizer, mappings)
             #     table_passage, tokenizer, args.LLMs_passage_max_token_length
             # )
             token_ids = tokenizer.encode(
-                passage,
+                table_passage,
                 max_length=args.LLMs_passage_max_token_length,
                 truncation=True,
                 padding="max_length",

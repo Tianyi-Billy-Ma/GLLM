@@ -157,6 +157,15 @@ def main(args):
             HG, osp.join(args.processed_data_dir, args.dname, "GNNs", "HG.pickle")
         )
     else:
+        model, tokenizer = load_retriever(args.LLMs_pretrain_model)
+
+        if args.LLMs_pretrain_include_tags:
+            tokenizer = add_special_token(tokenizer)
+            model.resize_token_embeddings(len(tokenizer))
+
+        args.LLMs_pretrain_vocab_size = len(tokenizer)
+        args.pad_token_id = tokenizer.pad_token_id
+
         HG = load_pickle(
             osp.join(args.processed_data_dir, args.dname, "GNNs", "HG.pickle")
         )
@@ -301,8 +310,9 @@ if __name__ == "__main__":
     args = parse_args()
     args.LLMs_pretrain_include_tags = False
     args.GNNs_reverse_HG = False
-    args.reprocess_dataset = False
+    args.reprocess_dataset = True
     args.GNNs_aug = "edge"
     args.LLMs_save_or_load_index = False
-    args.reprocess_dataset = True
+    args.reprocess_dataset = False
+    args.GNNs_pretrain_emb = False
     main(args)
