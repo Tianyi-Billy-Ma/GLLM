@@ -175,12 +175,19 @@ class Retriever:
         return embeddings, ids
 
     def search_table(self, query, top_n=30):
-        questions_embedding = self.embed_queries(self.args, [query])
+        if isinstance(query, list):
+            questions_embedding = self.embed_queries(self.args, query)
+        else:
+            questions_embedding = self.embed_queries(self.args, [query])
 
         # get top k results
         top_ids_and_scores = self.index.search_knn(questions_embedding, top_n)
 
-        return top_ids_and_scores[0][0][:top_n]
+        if isinstance(query, list):
+            res = [v[0][:top_n] for v in top_ids_and_scores]
+        else:
+            res = top_ids_and_scores[0][0][:top_n]
+        return res
 
     def setup_retriever(self):
         logger.info(f"Load model from {self.args.LLMs_retriever_model_name}")

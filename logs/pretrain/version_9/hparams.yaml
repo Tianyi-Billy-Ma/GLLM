@@ -1,0 +1,12 @@
+adam_beta1: 0.9
+adam_beta2: 0.98
+adam_epsilon: 1.0e-05
+adam_w_mode: true
+base_learning_rate: 0.0001
+batch_size: 128
+lr_scheduler_type: linear
+optimizer: Adam
+save_every_n_epochs: 1
+save_top_k: 3
+warmup_step_ratio: 0.05
+weight_decay: 0.02

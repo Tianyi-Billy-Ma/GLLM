@@ -51,6 +51,8 @@ class ContrastiveLoss(nn.Module):
         where corresponding indices are pairs
         z_i, z_j in the SimCLR paper
         """
+        if tau is not None:
+            self.temperature = tau
 
         z_i = F.normalize(proj_1, p=2, dim=1)
         z_j = F.normalize(proj_2, p=2, dim=1)

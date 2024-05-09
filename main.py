@@ -73,12 +73,13 @@ class PlModel(pl.LightningModule):
         self.model = Encoder(model_cfg)
         self.model_cfg = model_cfg
         self.optimizer_cfg = optimizer_cfg
-
+        self.save_hyperparameters()
+        
         self.loss = ContrastiveLoss(temperature=0.2)
 
     def training_step(self, batch, batch_index):
+        
         batch_sub = copy.deepcopy(batch)
-
         emb_V, emb_E = self.model(batch)
         emb1 = torch.index_select(emb_E, 0, torch.nonzero(batch.mask).squeeze())
 

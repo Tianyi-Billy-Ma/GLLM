@@ -91,6 +91,7 @@ def generate_node_plaintext_from_tables(args, tables):
                     text = normalize(text)
                 text = START_NODE_TAG + text + END_NODE_TAG
                 res.append(text)
+        assert len(res) == len(header) * len(rows), "Number of nodes mismatch"
         return res
 
     return {tname: generate_node_plaintext_from_table(t) for tname, t in tables.items()}
@@ -110,7 +111,7 @@ def generate_hyperedges_plaintext_from_tables(
             if "dict" in args.LLMs_table_plaintext_format:
                 m = "; ".join(
                     [
-                        f"{headers[idx]}: {cell if cell else NULL_TAG}'"
+                        f"{headers[idx]}: {cell if cell else NULL_TAG}"
                         for idx, cell in enumerate(row)
                     ]
                 )
@@ -343,19 +344,28 @@ def construct_hypergraph(args, tables, passage_dict, model, tokenizer, mappings)
         passage_dict["nodes"],
         passage_dict["hyperedges"],
     )
-    table_passages = passage_dict["tables"]
-    nids, node_embeddings = generate_embeddings(args, node_passages, model, tokenizer)
-    eids, hyperedge_embeddings = generate_embeddings(
-        args, hyperperedge_passages, model, tokenizer
-    )
-    tids, table_embeddings = generate_embeddings(args, table_passages, model, tokenizer)
+
+    nids = [nid for nid, _ in node_passages.items()]
+    eids = [eid for eid, _ in hyperperedge_passages.items()]
+    tids = [tid for tid, _ in tables.items()]
+
     tid2nids, tid2eids = mappings  # table id to node ids, table id to hyperedge ids
+    if args.GNNs_pretrain_emb:
+        table_passages = passage_dict["tables"]
+        _, node_embeddings = generate_embeddings(args, node_passages, model, tokenizer)
+        _, hyperedge_embeddings = generate_embeddings(
+            args, hyperperedge_passages, model, tokenizer
+        )
+        _, table_embeddings = generate_embeddings(
+            args, table_passages, model, tokenizer
+        )
+
     for t_idx, (key, val) in enumerate(tables.items()):
         tid = f"table_{t_idx}"
 
         edge_index, num_rows, num_cols = generate_edge_index(val)
 
-        if True:
+        if args.GNNs_pretrain_emb:
             x_s, x_t = [], []
             x_s = np.array(
                 [
@@ -377,8 +387,9 @@ def construct_hypergraph(args, tables, passage_dict, model, tokenizer, mappings)
 
         else:
             xs_ids, xt_ids = [], []
-
-            for id in nids + eids:
+            curr_nids = tid2nids[tid]
+            curr_eids = tid2eids[tid]
+            for id in curr_nids + curr_eids:
                 assert (
                     id.startswith("node")
                     or id.startswith("row")
@@ -403,19 +414,15 @@ def construct_hypergraph(args, tables, passage_dict, model, tokenizer, mappings)
                     xs_ids.append(token_ids)
                 else:
                     xt_ids.append(token_ids)
-            assert (
-                len(xs_ids) == len(nids) and len(xs_ids) == num_rows * num_cols
-            ), "Number of nodes mismatch"
-            assert (
-                len(xt_ids) == len(eids) and len(xt_ids) == num_rows + num_cols
-            ), "Number of hyperedges mismatch"
+            assert len(xs_ids) == num_rows * num_cols, "Number of nodes mismatch"
+            assert len(xt_ids) == num_rows + num_cols, "Number of hyperedges mismatch"
 
             xs_ids = torch.LongTensor(xs_ids)
             xt_ids = torch.LongTensor(xt_ids)
 
             ### Add Table ids to x_t
 
-            table_passage = table_passages[t_id]
+            table_passage = table_passages[tid]
             # _, token_ids = generate_tokens_and_token_ids(
             #     table_passage, tokenizer, args.LLMs_passage_max_token_length
             # )
@@ -446,7 +453,7 @@ def construct_hypergraph(args, tables, passage_dict, model, tokenizer, mappings)
         hypergraph_list.append(hg)
 
     HG = DataLoader(
-        hypergraph_list, batch_size=args.GNNs_batch_size, shuffle=False, drop_last=False
+        hypergraph_list, batch_size=args.GNNs_batch_size, shuffle=True, drop_last=False
     )
     return HG
 

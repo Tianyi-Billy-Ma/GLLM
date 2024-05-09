@@ -12,7 +12,7 @@ from torch_scatter import scatter
 
 
 class SetGNN(nn.Module):
-    def __init__(self, args, norm=None):
+    def __init__(self, args):
         super(SetGNN, self).__init__()
         self.args = args
         self.num_layers = args.GNNs_num_layers
@@ -41,42 +41,6 @@ class SetGNN(nn.Module):
         return emb_V, emb_E[:num_hyperedges]
 
 
-class Embedding(nn.Module):
-    def __init__(self, args):
-        super(Embedding, self).__init__()
-        self.embed_tokenizor = nn.Embedding(
-            args.LLMs_pretrain_vocab_size, args.GNNs_hidden_dim, args.pad_token_id
-        )
-        self.norm = nn.LayerNorm(args.GNNs_hidden_dim, eps=args.GNNs_layernorm_eps)
-        self.dropout = nn.Dropout(args.GNNs_dropout)
-
-    def reset_parameters(self):
-        self.embed_tokenizor.reset_parameters()
-        self.norm.reset_parameters()
-
-    def forward(self, x_s, x_t):
-        emb_V, emb_E = self.embed_tokenizor(x_s), self.embed_tokenizor(x_t)
-        emb_V = torch.div(
-            torch.sum(emb_V, dim=1), torch.count_nonzero(x_s, dim=1).unsqueeze(-1)
-        )
-        emb_E = torch.div(
-            torch.sum(emb_E, dim=1), torch.count_nonzero(x_t, dim=1).unsqueeze(-1)
-        )
-
-        emb_V, emb_E = self.norm(emb_V), self.norm(emb_E)
-        emb_V, emb_E = self.dropout(emb_V), self.dropout(emb_E)
-        return emb_V, emb_E
-
-    def forward_(self, x):
-        emb = self.embed_tokenizor(x)
-        emb = torch.div(
-            torch.sum(emb, dim=1), torch.count_nonzero(x, dim=1).unsqueeze(-1)
-        )
-        emb = self.norm(emb)
-        emb = self.dropout(emb)
-        return emb
-
-
 class EncoderLayer(nn.Module):
     def __init__(self, args):
         super(EncoderLayer, self).__init__()
@@ -86,7 +50,6 @@ class EncoderLayer(nn.Module):
 
         self.V2E = nn.Linear(args.GNNs_hidden_dim, args.GNNs_hidden_dim)
         self.E2V = nn.Linear(args.GNNs_hidden_dim, args.GNNs_hidden_dim)
-
         self.fuse = nn.Linear(args.GNNs_hidden_dim * 2, args.GNNs_hidden_dim)
 
     def reset_parameters(self):
@@ -98,33 +61,25 @@ class EncoderLayer(nn.Module):
         reversed_edge_index = torch.stack([edge_index[1], edge_index[0]], dim=0)
 
         emb_E_tem = self.V2E(emb_V)
-
-        emb_E_tem = F.relu(
-            scatter(emb_E_tem[edge_index[0, :]], edge_index[1, :], dim=0, reduce="mean")
+        emb_E_tem = scatter(
+            emb_E_tem[edge_index[0]], edge_index[1], dim=0, reduce="mean"
         )
+        emb_E_tem = F.relu(emb_E_tem)
 
         emb_E = torch.cat([emb_E, emb_E_tem], dim=-1)
-        emb_E = F.dropout(self.fuse(emb_E), p=self.dropout, training=self.training)
+        emb_E = self.fuse(emb_E)
+        emb_E = F.dropout(emb_E, p=self.dropout, training=self.training)
 
         emb_V = self.E2V(emb_E)
-        emb_V = F.relu(
-            scatter(
-                emb_V[reversed_edge_index[0, :]],
-                reversed_edge_index[1, :],
-                dim=0,
-                reduce="mean",
-            )
+        emb_V = scatter(
+            emb_V[reversed_edge_index[0]],
+            reversed_edge_index[1],
+            dim=0,
+            reduce="mean",
         )
+        emb_V = F.relu(emb_V)
 
         emb_V = F.dropout(emb_V, p=self.dropout, training=self.training)
-        # emb_E_tem = F.relu(self.V2E(emb_V, edge_index))
-
-        # emb_E = torch.cat([emb_E, emb_E_tem], dim=-1)
-
-        # emb_E = F.dropout(self.fuse(emb_E), p=self.dropout, training=self.training)
-
-        # emb_V = F.relu(self.E2V(emb_E, reversed_edge_index))
-        # emb_V = F.dropout(emb_V, p=self.dropout, training=self.training)
 
         return emb_V, emb_E
 
@@ -165,3 +120,39 @@ class Encoder(nn.Module):
             emb_V, emb_E = layer(emb_V, emb_E, edge_index)
 
         return emb_V, emb_E
+
+
+class Embedding(nn.Module):
+    def __init__(self, args):
+        super(Embedding, self).__init__()
+        self.embed_tokenizor = nn.Embedding(
+            args.LLMs_pretrain_vocab_size, args.GNNs_hidden_dim, args.pad_token_id
+        )
+        self.norm = nn.LayerNorm(args.GNNs_hidden_dim, eps=args.GNNs_layernorm_eps)
+        self.dropout = nn.Dropout(args.GNNs_dropout)
+
+    def reset_parameters(self):
+        self.embed_tokenizor.reset_parameters()
+        self.norm.reset_parameters()
+
+    def forward(self, x_s, x_t):
+        emb_V, emb_E = self.embed_tokenizor(x_s), self.embed_tokenizor(x_t)
+        emb_V = torch.div(
+            torch.sum(emb_V, dim=1), torch.count_nonzero(x_s, dim=1).unsqueeze(-1)
+        )
+        emb_E = torch.div(
+            torch.sum(emb_E, dim=1), torch.count_nonzero(x_t, dim=1).unsqueeze(-1)
+        )
+
+        emb_V, emb_E = self.norm(emb_V), self.norm(emb_E)
+        emb_V, emb_E = self.dropout(emb_V), self.dropout(emb_E)
+        return emb_V, emb_E
+
+    def forward_(self, x):
+        emb = self.embed_tokenizor(x)
+        emb = torch.div(
+            torch.sum(emb, dim=1), torch.count_nonzero(x, dim=1).unsqueeze(-1)
+        )
+        emb = self.norm(emb)
+        emb = self.dropout(emb)
+        return emb

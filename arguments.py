@@ -89,10 +89,10 @@ def parse_args():
     parser.add_argument("-GNNs_wd", default=0.0, type=float)
     parser.add_argument("--GNNs_aug", default="mask", type=str)
     parser.add_argument("--GNNs_aug_ratio", default=0.2, type=float)
-    parser.add_argument("--GNNs_tau", default=0.2, type=float)
+    parser.add_argument("--GNNs_tau", default=0.07, type=float)
     parser.add_argument("--GNNs_dir", default=GNNs_dir)
     parser.add_argument("--GNNs_num_layers", default=1, type=int)
-    parser.add_argument("--GNNs_dropout", default=0.2, type=float)
+    parser.add_argument("--GNNs_dropout", default=0.0, type=float)
     parser.add_argument("--GNNs_hidden_dim", default=768, type=int)
     parser.add_argument("--GNNs_MLP_hidden", default=768, type=int)
     parser.add_argument("--GNNs_layernorm_eps", default=1e-12, type=float)
@@ -100,6 +100,7 @@ def parse_args():
     parser.add_argument("--GNNs_num_heads", default=8, type=int)
     parser.add_argument("--GNNs_batch_size", default=32, type=int)
     parser.add_argument("--GNNs_gated_proj", action="store_true")
+    parser.add_argument("--GNNs_pretrain_emb", action="store_true")
     parser.add_argument("-GNNs_activation_fn", default="relu")
     # GNNs Placeholder
     parser.add_argument("--GNNs_num_features", type=int)
@@ -108,6 +109,7 @@ def parse_args():
         "--GNNs_reverse_HG", action="store_false", help="reverse hypergraph"
     )
     # args for Dataset
+    parser.add_argument("--reprocess_dataset", default=True, type=bool)
     parser.add_argument("--data_dir", default=data_dir, type=str)
     parser.add_argument("--raw_data_dir", default=raw_data_dir, type=str)
     parser.add_argument("--processed_data_dir", default=processed_data_dir, type=str)

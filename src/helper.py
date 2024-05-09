@@ -2,6 +2,9 @@ from torch.utils.data.sampler import BatchSampler
 from torch_geometric.data import Data
 import torch
 from torch.utils.data import default_collate
+import random
+import os
+import numpy as np
 
 
 class HypergraphBatchSampler(BatchSampler):
@@ -46,3 +49,13 @@ class BipartiteData(Data):
         elif key == "hg_idx":
             return 0
         return super().__inc__(key, value, *args, **kwargs)
+
+
+def seed_everything(seed):
+    random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
