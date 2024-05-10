@@ -54,7 +54,7 @@ def parse_args():
     parser.add_argument(
         "--LLMs_n_bits", type=int, default=8, help="Number of bits per subquantizer"
     )
-    parser.add_argument("--LLMs_save_or_load_index", action="store_false")
+    parser.add_argument("--LLMs_save_or_load_index", action="store_true")
     parser.add_argument("--LLMs_reload_index", action="store_true")
     parser.add_argument("--LLMs_indexing_batch_size", type=int, default=1000000)
     parser.add_argument("--LLMs_lowercase", action="store_true")
@@ -87,7 +87,7 @@ def parse_args():
     parser.add_argument("-GNNs_epochs", default=5, type=int)
     parser.add_argument("-GNNs_lr", default=0.001, type=float)
     parser.add_argument("-GNNs_wd", default=0.0, type=float)
-    parser.add_argument("--GNNs_aug", default="mask", type=str)
+    parser.add_argument("--GNNs_aug", default="edge", type=str)
     parser.add_argument("--GNNs_aug_ratio", default=0.2, type=float)
     parser.add_argument("--GNNs_tau", default=0.07, type=float)
     parser.add_argument("--GNNs_dir", default=GNNs_dir)
@@ -106,7 +106,7 @@ def parse_args():
     parser.add_argument("--GNNs_num_features", type=int)
     parser.add_argument("--GNNs_num_classes", type=int)
     parser.add_argument(
-        "--GNNs_reverse_HG", action="store_false", help="reverse hypergraph"
+        "--GNNs_reverse_HG", action="store_true", help="reverse hypergraph"
     )
     # args for Dataset
     parser.add_argument("--reprocess_dataset", default=True, type=bool)

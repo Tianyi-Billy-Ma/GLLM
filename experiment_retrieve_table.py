@@ -2,7 +2,7 @@ import os
 import os.path as osp
 import time
 import logging
-from transformers import AutoTokenizer, AutoConfig, BertModel
+from transformers import AutoTokenizer, AutoConfig, BertModel, AutoModel
 import faiss
 import pickle
 import numpy as np
@@ -27,6 +27,15 @@ from src.preprocess import (
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 logger = logging.getLogger(__name__)
+
+
+def load_model(model_path):
+    if model_path == "facebook/contriever-msmarco":
+        return load_retriever(model_path)
+    else:
+        tokenzier = load_hf(AutoTokenizer, model_path)
+        model = load_hf(AutoModel, model_path)
+    return model, tokenzier
 
 
 def load_retriever(model_path, pooling="average", random_init=False):
@@ -163,12 +172,19 @@ class Retriever:
                     embeddings.append(self.model(**encoded_batch, normalize=True))
                     batch_questions = []
         embeddings = torch.cat(embeddings, dim=0)
-        return embeddings.cpu().numpy()
+
+        embeddings = embeddings.cpu().numpy()
+        # embeddings = np.concatenate([embeddings, embeddings], axis=-1)
+        return embeddings
+        # return embeddings.cpu().numpy()
 
     def add_embeddings(self, index, embeddings, ids, indexing_batch_size):
         end_idx = min(indexing_batch_size, embeddings.shape[0])
         ids_to_add = ids[:end_idx]
         embeddings_to_add = embeddings[:end_idx]
+        # embeddings_to_add = np.concatenate(
+        #     [embeddings_to_add, embeddings_to_add], axis=-1
+        # )
         ids = ids[end_idx:]
         embeddings = embeddings[end_idx:]
         index.index_data(ids_to_add, embeddings_to_add)
@@ -191,7 +207,7 @@ class Retriever:
 
     def setup_retriever(self):
         logger.info(f"Load model from {self.args.LLMs_retriever_model_name}")
-        self.model, self.tokenizer = load_retriever(self.args.LLMs_retriever_model_name)
+        self.model, self.tokenizer = load_model(self.args.LLMs_retriever_model_name)
 
         if self.args.LLMs_retriever_include_tags:
             node_token_names = ["[NODE]", "[/NODE]"]
@@ -432,15 +448,19 @@ def run_with_table(args):
     print("Accuracy: ", correct / num_questions)
 
 
-def run(args, qas, questions, model, retriever):
+def run(args, qas, model, retriever):
     predictions = {}
 
-    # for idx, (qid, qa) in tqdm(enumerate(qas.items())):
-    for idx, (qid, qa) in enumerate(qas.items()):
-        question = questions[qid] if args.LLMs_rephrase_question else qa["question"]
+    qids = list(qas.keys())
+    questions = [qas[qid]["question"] for qid in qids]
+    # documents = retriever.search_table(passages, 15)
 
-        documents = retriever.search_table(question, 15)
-        predictions[qid] = documents
+    # for qid, document in zip(qids, documents):
+    #     predictions[qid] = document
+
+    for qid, question in zip(qids, questions):
+        document = retriever.search_table(question, 15)
+        predictions[qid] = document
 
     return predictions
 
@@ -454,16 +474,15 @@ def main(args):
     data = load_pickle(osp.join(pretrain_dir, "plaintext_data.pickle"))
     tables, qas = data["tables"], data["qas"]
 
-    questions = {}
-    rephrase_questions = process_questions(args)
-    for qid, question in rephrase_questions.items():
-        qas[qid]["question"] = question
-        questions[qid] = question
+    if args.LLMs_rephrase_question:
+        rephrase_questions = process_questions(args)
+        for qid, question in rephrase_questions.items():
+            qas[qid]["question"] = question
 
     retriever = Retriever(args)
     retriever.setup_retriever()
 
-    predictions = run(args, qas, questions, None, retriever)
+    predictions = run(args, qas, None, retriever)
 
     save_json(predictions, osp.join(output_dir, "predictions.json"))
 
@@ -503,7 +522,7 @@ def evaluate_retriever(args):
 
 
 def LLMs_generate_table_embeddings(args):
-    model, tokenizer = load_retriever(args.LLMs_pretrain_model)
+    model, tokenizer = load_model(args.LLMs_retriever_model_name)
     if args.LLMs_pretrain_include_tags:
         tokenizer = add_special_token(tokenizer)
         model.resize_token_embeddings(len(tokenizer))
@@ -511,7 +530,7 @@ def LLMs_generate_table_embeddings(args):
     model = model.to(device)
 
     load_path = osp.join(
-        args.processed_data_dir, args.dname, "pretrain", "plaintext_tables.pickle"
+        args.processed_data_dir, args.dname, "pretrain", "plaintext_data.pickle"
     )
     data = load_pickle(osp.join(load_path))
     tables, qas = data["tables"], data["qas"]
@@ -525,14 +544,14 @@ def LLMs_generate_table_embeddings(args):
 
     if args.save_output:
         #  curr_time = time.strftime("%Y-%m-%d-%H-%M-%S", time.gmtime())
-        save_model_name = args.LLMs_pretrain_model.split("/")[-1]
+        save_model_name = args.LLMs_retriever_model_name.split("/")[-1]
         output_dir = osp.join(
             args.root_dir,
             "output",
             "LLMs",
             # f"{args.LLMs_table_plaintext_format}_{save_model_name}_{curr_time}",
             f"oq_{args.LLMs_table_plaintext_format}_{save_model_name}"
-            if args.rephrase_question
+            if not args.LLMs_rephrase_question
             else f"{args.LLMs_table_plaintext_format}_{save_model_name}",
         )
         os.makedirs(output_dir, exist_ok=True)
@@ -672,7 +691,7 @@ def GNNs_generate_table_embeddings(args):
 
     if args.save_output:
         #  curr_time = time.strftime("%Y-%m-%d-%H-%M-%S", time.gmtime())
-        save_model_name = args.LLMs_pretrain_model.split("/")[-1]
+        save_model_name = args.LLMs_retriever_model_name.split("/")[-1]
         output_dir = osp.join(
             args.root_dir,
             "output",
@@ -699,9 +718,9 @@ def combination_embeddings(args):
     LLMs_table_embedding_dir = osp.join(
         args.root_dir,
         "output",
-        f"oq_{args.LLMs_table_plaintext_format}_{args.LLMs_pretrain_model.split('/')[-1]}"
+        f"oq_{args.LLMs_table_plaintext_format}_{args.LLMs_retriever_model_name.split('/')[-1]}"
         if not args.LLMs_rephrase_question
-        else f"{args.LLMs_table_plaintext_format}_{args.LLMs_pretrain_model.split('/')[-1]}",
+        else f"{args.LLMs_table_plaintext_format}_{args.LLMs_retriever_model_name.split('/')[-1]}",
     )
 
     GNNs_table_embedding_dir = osp.join(
@@ -744,6 +763,8 @@ if __name__ == "__main__":
 
     args.LLMs_rephrase_question = True
     args.LLMs_save_or_load_index = False
+    args.LLMs_pretrain_include_tags = True
+    args.LLMs_projection_size = 768
     # for table_format in ["md", "dict", "html", "sentence"]:
     #     for sub in ["", "_summary", "_summary_title", "_title"]:
     #         table_plaintext_format = table_format + sub
@@ -772,9 +793,10 @@ if __name__ == "__main__":
     # )
     # main(args)
 
-    output_dir = "/media/mtybilly/My Passport1/Program/GLLM/output/LLMs/dict_summary_title_contriever-msmarco"
-
-    # output_dir = "/media/mtybilly/My Passport1/Program/GLLM/output/GNNs/table_from_he"
+    args.LLMs_retriever_model_name = "google-bert/bert-base-uncased"
+    args.LLMs_table_plaintext_format = "dict_summary_title"
+    args.save_output = True
+    output_dir = LLMs_generate_table_embeddings(args)
     args.LLMs_retriever_input_path = output_dir
 
     main(args)

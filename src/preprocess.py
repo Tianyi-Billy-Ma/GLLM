@@ -15,7 +15,7 @@ from torch_geometric.loader import DataLoader
 from .helper import BipartiteData
 from .normalize_text import normalize
 
-from .load_data import load_json, load_pickle
+from .load_data import load_json, load_pickle, save_pickle
 import os
 import os.path as osp
 import json
@@ -240,6 +240,18 @@ def generate_plaintext_from_table(table, args=None):
                     + "\n"
                     + res
                 )
+            elif (
+                args.LLMs_pretrain_include_tags
+                and table["summary"].startswith(START_SUMMARY_TAG)
+                and table["summary"].endswith(END_SUMMARY_TAG)
+            ):
+                pass
+            elif not (
+                args.LLMs_pretrain_include_tags
+                and table["summary"].startswith(START_SUMMARY_TAG)
+                and table["summary"].endswith(END_SUMMARY_TAG)
+            ):
+                pass
             else:
                 raise ValueError(
                     "Table summary should be enclosed with [SUMMARY] and [/SUMMARY] or not enclosed with [SUMMARY] and [/SUMMARY]"
@@ -263,6 +275,18 @@ def generate_plaintext_from_table(table, args=None):
                     + "\n"
                     + res
                 )
+            elif not (
+                args.LLMs_pretrain_include_tags
+                and table["title"].startswith(START_TITLE_TAG)
+                and table["title"].endswith(END_TITLE_TAG)
+            ):
+                pass
+            elif (
+                not args.LLMs_pretrain_include_tags
+                and table["title"].startswith(START_TITLE_TAG)
+                and table["title"].endswith(END_TITLE_TAG)
+            ):
+                pass
             else:
                 raise ValueError(
                     "Table title should be enclosed with [TITLE] and [/TITLE] or not enclosed with [TITLE] and [/TITLE]"
@@ -347,42 +371,40 @@ def construct_hypergraph(args, tables, passage_dict, model, tokenizer, mappings)
 
     table_passages = passage_dict["tables"]
 
-    nids = [nid for nid, _ in node_passages.items()]
-    eids = [eid for eid, _ in hyperperedge_passages.items()]
-    tids = [tid for tid, _ in tables.items()]
-
     tid2nids, tid2eids = mappings  # table id to node ids, table id to hyperedge ids
     if args.GNNs_pretrain_emb:
-        table_passages = passage_dict["tables"]
-        _, node_embeddings = generate_embeddings(args, node_passages, model, tokenizer)
-        _, hyperedge_embeddings = generate_embeddings(
-            args, hyperperedge_passages, model, tokenizer
-        )
-        _, table_embeddings = generate_embeddings(
-            args, table_passages, model, tokenizer
-        )
+        GNNs_dir = osp.join(args.processed_data_dir, args.dname, "GNNs")
+        node_embeddings, hyperedge_embeddings, table_embeddings = None, None, None
+        for emb_type in ["node", "hyperedge", "table"]:
+            source_path = osp.join(
+                GNNs_dir, f"emb_{args.LLMs_table_plaintext_format}_{emb_type}.pickle"
+            )
 
-    for t_idx, (key, val) in enumerate(tables.items()):
+            if osp.exists(source_path) and not args.GNNs_regenerate_emb:
+                embs = load_pickle(source_path)
+                ids = [id for id, _ in embs.items()]
+            else:
+                passages = eval(f"{emb_type}_passages")
+                ids, embeddings = generate_embeddings(args, passages, model, tokenizer)
+                embs = {id: emb for id, emb in zip(ids, embeddings)}
+                save_pickle(embs, source_path)
+            if emb_type == "node":
+                nids, node_embs = ids, embs
+            elif emb_type == "hyperedge":
+                eids, hyperedge_embs = ids, embs
+            elif emb_type == "table":
+                tids, table_embs = ids, embs
+            else:
+                raise ValueError("Error")
+    for t_idx, (key, val) in tqdm(enumerate(tables.items()), desc="Constructing HG"):
         tid = f"table_{t_idx}"
-
         edge_index, num_rows, num_cols = generate_edge_index(val)
 
         if args.GNNs_pretrain_emb:
             x_s, x_t = [], []
-            x_s = np.array(
-                [
-                    node_embeddings[i]
-                    for i, nid in enumerate(nids)
-                    if nid in tid2nids[tid]
-                ]
-            )
+            x_s = np.array([node_embs[nid] for nid in tid2nids[tid]])
             x_t = np.array(
-                [
-                    hyperedge_embeddings[i]
-                    for i, eid in enumerate(eids)
-                    if eid in tid2eids[tid]
-                ]
-                + [table_embeddings[t_idx]]
+                [hyperedge_embs[eid] for eid in tid2eids[tid]] + [table_embs[tid]]
             )
             x_s = torch.FloatTensor(x_s)
             x_t = torch.FloatTensor(x_t)
@@ -452,6 +474,16 @@ def construct_hypergraph(args, tables, passage_dict, model, tokenizer, mappings)
         hg = reverse_bipartite_data(hg) if args.GNNs_reverse_HG else hg
         hg.num_nodes = hg.x_s.shape[0]
         hg.num_hyperedges = hg.x_t.shape[0]
+        hg.gid = t_idx
+        hg.V2G = torch.LongTensor([t_idx for _ in range(hg.num_nodes)])
+        hg.E2G = torch.LongTensor([t_idx for _ in range(hg.num_hyperedges)])
+        hg.reversed = args.GNNs_reverse_HG == True
+        hg.tidx = hg.num_nodes - 1 if args.GNNs_reverse_HG else hg.num_hyperedges - 1
+        hg.emb_G = (
+            hg.x_s[-1, :].unsqueeze(0)
+            if args.GNNs_reverse_HG
+            else hg.x_t[-1, :].unsqueeze(0)
+        )
         hypergraph_list.append(hg)
 
     HG = DataLoader(

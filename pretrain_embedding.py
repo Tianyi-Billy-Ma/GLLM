@@ -90,7 +90,7 @@ def generate_embeddings(args, passages, model, tokenizer):
                 encoded_batch = tokenizer.batch_encode_plus(
                     batch_text,
                     return_tensors="pt",
-                    max_length=args.LLMs_passage_maxlength,
+                    max_length=args.LLMs_passage_max_length,
                     padding=True,
                     truncation=True,
                 )

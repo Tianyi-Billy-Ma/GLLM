@@ -220,9 +220,20 @@ md + title + node:
 
 
 
+Hypergraph Embeddings + dict + summary + title + Origianl Questons:
 
-Hypergraph Embeddings + Rephrased Questions
+{"1": 45.82, "3": 56.13, "5": 64.28, "10": 69.26}
 
-{"1": 0.02, "3": 0.09, "5": 0.18, "10": 0.4}
+dict format + summary + title + Original Questions
 
+{"1": 39.68, "3": 52.9, "5": 59.13, "10": 67.07}
 
+Hypergraph Embeddings + dict + summary + title + Rephrased Questons:
+
+{"1": 76.89, "3": 85.31, "5": 87.84, "10": 90.42}  ## Best Model 
+
+dict format + summary + title + Rephrased Questions:   
+
+{"1": 71.19, "3": 81.81, "5": 85.53, "10": 89.52}  ## Best Baseline 
+
+10 epochs loss: 5~ =>2~
